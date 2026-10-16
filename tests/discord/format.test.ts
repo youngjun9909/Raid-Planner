@@ -207,6 +207,22 @@ describe('formatPlan', () => {
     expect(msg.embeds[0].description).toContain('철수');
   });
 
+  it('추천이 10개를 넘어도 임베드는 10개까지, 합계 6000자 안 (작은 추천 12개)', () => {
+    const small: Candidate = {
+      summary: summary({ friendCount: 1, characterCount: 1, partyCount: 1, externalCount: 3, externalSupports: 1, externalDealers: 2 }),
+      imbalance: 0,
+      parties: [party('tight', 3300, [
+        { kind: 'friend', friendId: 'a', character: friends[0].characters[0] },
+        { kind: 'external', role: 'support' }, { kind: 'external', role: 'dealer' }, { kind: 'external', role: 'dealer' },
+      ])],
+    };
+    const msg = formatPlan(serkaHard, { candidates: Array.from({ length: 12 }, () => small), excluded: [] }, friends, NOW);
+    expectValidEmbeds(msg.embeds);
+    expect(msg.embeds).toHaveLength(10);
+    expect(msg.embeds[9].title).toBe('추천 10 · 세르카 하드');
+    expect(msg.content).toBe('🏰 세르카 하드 공대 추천 12개를 찾았어요 (길어서 10개만 보여요)');
+  });
+
   // 실제 플래너 결과로 만드는 최악의 경우: 긴 이름의 친구 8명 x 캐릭터 6개
   const longRoster = (suffix = '') => {
     const roles: Character['role'][] = ['dealer', 'dealer', 'support', 'dealer', 'support', 'dealer'];
@@ -231,7 +247,9 @@ describe('formatPlan', () => {
     expect(msg.embeds[0].fields!.filter((f) => f.name !== '​')).toHaveLength(8);
     expect(allPlaced(msg, plan.candidates[0])).toBe(true);
     expect(msg.embeds[0].description).not.toContain('만 보여요');
-    if (msg.embeds.length < 3) expect(msg.content).toContain(`(길어서 ${msg.embeds.length}개만 보여요)`);
+    // 6000자 제한 때문에 추천 3개 중 첫 추천만 들어가고, 그 사실을 content에 적는다 (결정적)
+    expect(msg.embeds.map((e) => e.title)).toEqual([`⭐ 추천 1 · ${raidTitle(raid)}`]);
+    expect(msg.content).toBe(`🏰 ${raidTitle(raid)} 공대 추천 3개를 찾았어요 (길어서 1개만 보여요)`);
   });
 
   it('공대가 많을 때: 4인 레이드 친구 8명 x 6 → 공대 16개는 다 보이고, 16명 → 공대 32개는 줄였다고 알린다', () => {

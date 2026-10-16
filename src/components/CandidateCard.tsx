@@ -2,9 +2,9 @@ import type { Candidate, Friend, Party } from '@/core/types';
 import { ROLE_LABEL, formatCP, formatLevel, planSummaryText } from '@/lib/view-model';
 import { TierBadge } from './TierBadge';
 
-function PartyBlock({ party, index, names }: { party: Party; index: number; names: Map<string, string> }) {
+function PartyBlock({ party, index, rank, names }: { party: Party; index: number; rank: number; names: Map<string, string> }) {
   return (
-    <section className={`party party--${party.tier}`} aria-label={`${index + 1}공대`}>
+    <section className={`party party--${party.tier}`} aria-label={`추천 ${rank + 1} ${index + 1}공대`}>
       <header className="party__head">
         <span className="party__name">{index + 1}공대</span>
         <span className="party__avg">
@@ -72,7 +72,7 @@ export function CandidateCard({
       </header>
       <div className="candidate__parties">
         {candidate.parties.map((p, i) => (
-          <PartyBlock key={i} party={p} index={i} names={names} />
+          <PartyBlock key={i} party={p} index={i} rank={rank} names={names} />
         ))}
       </div>
       {candidate.parties.length > 1 && candidate.imbalance > 0 && (

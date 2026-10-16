@@ -38,9 +38,10 @@ const worst = (c: Candidate) => Math.max(...c.parties.map((p) => BAD[p.tier]));
 const extSupports = (c: Candidate) =>
   c.parties.flatMap((p) => p.slots).filter((s) => s.kind === 'external' && s.role === 'support').length;
 const extTotal = (c: Candidate) => c.parties.flatMap((p) => p.slots).filter((s) => s.kind === 'external').length;
-// 순위 키(설계 수정 5번): 외부 서포터 수 → 외부 총 인원 → 최악 단계 → imbalance (사전식 비교용 고정폭 문자열)
+const worstCount = (c: Candidate) => c.parties.filter((p) => BAD[p.tier] === worst(c)).length;
+// 순위 키(설계 수정 5번): 외부 서포터 수 → 외부 총 인원 → 최악 단계 → 최악 단계 공대 수 → imbalance (사전식 비교용 고정폭 문자열)
 const rankKey = (c: Candidate) =>
-  [extSupports(c), extTotal(c), worst(c), c.imbalance].map((n) => n.toFixed(3).padStart(12, '0')).join('|');
+  [extSupports(c), extTotal(c), worst(c), worstCount(c), c.imbalance].map((n) => n.toFixed(3).padStart(12, '0')).join('|');
 // 공대 순서를 무시한 배정 키
 const groupingKey = (c: Candidate) =>
   c.parties.map((p) => friendSlots(p).map((s) => s.character.name).sort().join(',')).sort().join(' / ');
@@ -248,7 +249,7 @@ describe('planRaid: 여러 공대 편성 규칙', () => {
     expect(planRaid({ raid: serkaHard, friends, clears, attendeeIds: [] })).toEqual({ candidates: [], excluded: [] });
   });
 
-  it('정렬: 외부 서포터 수 → 외부 총 인원 → 최악 단계 → imbalance, imbalance는 공대 평균 최댓값-최솟값', () => {
+  it('정렬: 외부 서포터 수 → 외부 총 인원 → 최악 단계 → 최악 단계 공대 수 → imbalance, imbalance는 공대 평균 최댓값-최솟값', () => {
     for (const raid of [serkaHard, kazerosHard]) {
       const r = planRaid({ raid, friends, clears, attendeeIds: ALL, limit: 1000 });
       expect(r.candidates.length).toBeGreaterThan(5);
@@ -361,6 +362,106 @@ describe('planRaid: 여러 공대 편성 규칙', () => {
   });
 });
 
+describe('planRaid: 편성 품질 (서포터가 섞인 교환, 최악 단계 공대 수)', () => {
+  it('[회귀] 같은 친구의 딜러와 서포터를 공대끼리 바꿔야 위험 공대가 없어지는 경우도 찾는다 (8인)', () => {
+    const fs = makeFriends({
+      A: [['A-sup1', 'support', 1740, 2000], ['A-weak', 'dealer', 1740, 3350], ['A-sup2', 'support', 1740, 2000]],
+      B: [['B-strong', 'dealer', 1740, 4600], ['B-weak', 'dealer', 1740, 3350], ['B-sup', 'support', 1740, 2000]],
+      C: [['C-strong', 'dealer', 1740, 4300]],
+    });
+    const r = planRaid({ raid: kazerosHard, friends: fs, clears: [], attendeeIds: ['A', 'B', 'C'] });
+    const top = r.candidates[0];
+    expect(top.parties).toHaveLength(3);
+    expect(top.parties.some((p) => p.tier === 'risky')).toBe(false);
+    expect(top.parties.filter((p) => p.tier === 'comfortable')).toHaveLength(2);
+  });
+
+  it('최악 단계가 같으면 그 단계인 공대가 적은 편성이 앞선다 (균형보다 먼저)', () => {
+    // 4인, 딜러 6명 → 공대 2개(3+3). 어느 배정이든 위험 공대가 있다(합 17,900 / 2 < 3,240).
+    // 가장 고르게 나누면 둘 다 위험, {4400,3300,3200}=3,633(여유) / 나머지(위험)로 나누면 위험 공대는 하나.
+    const fs = makeFriends({
+      a: [['a', 'dealer', 1740, 4400]], b: [['b', 'dealer', 1740, 3300]], c: [['c', 'dealer', 1740, 3200]],
+      d: [['d', 'dealer', 1740, 3000]], e: [['e', 'dealer', 1740, 2000]], f: [['f', 'dealer', 1740, 2000]],
+    });
+    const r = planRaid({ raid: serkaHard, friends: fs, clears: [], attendeeIds: ['a', 'b', 'c', 'd', 'e', 'f'], limit: 50 });
+    const top = r.candidates[0];
+    expect(top.parties.filter((p) => p.tier === 'risky')).toHaveLength(1);
+    // 둘 다 위험인(더 고른) 편성도 후보에는 있지만 뒤에 온다
+    const bothRisky = r.candidates.findIndex((c) => c.parties.every((p) => p.tier === 'risky'));
+    expect(bothRisky).toBeGreaterThan(0);
+    expect(r.candidates[bothRisky].imbalance).toBeLessThan(top.imbalance);
+  });
+
+  // 아주 작은 입력에서 가능한 모든 배정을 다 펼쳐 본 최적과 비교 (고정 시드)
+  const mulberry = (seed: number) => () => {
+    seed = (seed + 0x6d2b79f5) >>> 0;
+    let t = seed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  /** 같은 규칙(공대 수 최소, 역할 자리, 한 공대에 같은 친구 한 번, 빈 공대 없음)으로 가능한 배정 중 최악 단계의 최솟값. */
+  const bruteForceBestWorst = (fs: Friend[], raid: typeof serkaHard): number | null => {
+    const items = fs.flatMap((f) => f.characters.map((c) => ({ f: f.id, c })));
+    const ss = raid.size / 4;
+    const ds = raid.size - ss;
+    const sup = items.filter((x) => x.c.role === 'support').length;
+    const P = Math.max(1, ...fs.map((f) => f.characters.length), Math.ceil((items.length - sup) / ds), Math.ceil(sup / ss), Math.ceil(items.length / raid.size));
+    const parties: (typeof items)[] = Array.from({ length: P }, () => []);
+    let best: number | null = null;
+    const walk = (k: number, used: number) => {
+      if (k === items.length) {
+        if (parties.some((p) => p.length === 0)) return;
+        const w = Math.max(...parties.map((p) => {
+          const cps = p.flatMap((x) => (x.c.role === 'dealer' && x.c.combatPower !== null ? [x.c.combatPower] : []));
+          return BAD[tierFor(cps.length ? cps.reduce((a, b) => a + b, 0) / cps.length : null, raid)];
+        }));
+        if (best === null || w < best) best = w;
+        return;
+      }
+      const it = items[k];
+      for (let p = 0; p < Math.min(P, used + 1); p++) { // 공대 순서 대칭 제거
+        const g = parties[p];
+        if (g.some((x) => x.f === it.f)) continue;
+        const isSup = it.c.role === 'support';
+        if (g.filter((x) => (x.c.role === 'support') === isSup).length >= (isSup ? ss : ds)) continue;
+        g.push(it);
+        walk(k + 1, Math.max(used, p + 1));
+        g.pop();
+      }
+    };
+    walk(0, 0);
+    return best;
+  };
+
+  it('작은 무작위 입력 300개(캐릭터 ≤8, 고정 시드): 1순위 추천의 최악 단계는 완전 탐색 최적보다 나쁘지 않다', () => {
+    const rand = mulberry(20261016);
+    let checked = 0;
+    for (let n = 0; n < 300; n++) {
+      const raid = rand() < 0.5 ? serkaHard : kazerosHard;
+      const friendCount = 2 + Math.floor(rand() * 3);
+      const spec: Record<string, C[]> = {};
+      let total = 0;
+      for (let f = 0; f < friendCount && total < 8; f++) {
+        const k = Math.min(1 + Math.floor(rand() * 3), 8 - total);
+        total += k;
+        spec[`r${f}`] = Array.from({ length: k }, (_, j): C => {
+          const support = rand() < 0.3;
+          const cp = rand() < 0.1 ? null : 2800 + Math.round(rand() * 18) * 100;
+          return [`r${f}-${j}`, support ? 'support' : 'dealer', 1740, cp];
+        });
+      }
+      const fs = makeFriends(spec);
+      const best = bruteForceBestWorst(fs, raid);
+      const r = planRaid({ raid, friends: fs, clears: [], attendeeIds: fs.map((f) => f.id) });
+      if (best === null) continue;
+      checked++;
+      expect({ case: n, worst: worst(r.candidates[0]) }).toEqual({ case: n, worst: best });
+    }
+    expect(checked).toBeGreaterThan(250);
+  });
+});
+
 describe('planRaid: 성능', () => {
   const bigFriends = (n: number): Friend[] => {
     const roles: ('dealer' | 'support')[] = ['dealer', 'dealer', 'support', 'dealer', 'support', 'dealer'];
@@ -378,7 +479,6 @@ describe('planRaid: 성능', () => {
     const t0 = performance.now();
     const r = planRaid({ raid, friends: big, clears: [], attendeeIds: big.map((f) => f.id) });
     const ms = performance.now() - t0;
-    console.log(`[perf] ${n}명 x 6캐릭터, ${raid.size}인: ${ms.toFixed(1)} ms`);
     return { r, ms };
   };
   const checkAll = (r: ReturnType<typeof planRaid>, n: number, parties: number) => {
@@ -419,7 +519,6 @@ describe('planRaid: 성능', () => {
     const t0 = performance.now();
     const r = planRaid({ raid: kazerosHard, friends: fs, clears: [], attendeeIds: fs.map((f) => f.id) });
     const ms = performance.now() - t0;
-    console.log(`[perf] 딜러만 8명 x 6캐릭터, 8인: ${ms.toFixed(1)} ms`);
     expect(ms).toBeLessThan(1000);
     expect(r.candidates[0].parties).toHaveLength(8); // max(친구별 6, ceil(48/6)=8, ceil(48/8)=6)
     expect(r.candidates[0].summary.externalSupports).toBe(16);

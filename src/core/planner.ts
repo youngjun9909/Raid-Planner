@@ -25,8 +25,14 @@ const TIER_BADNESS: Record<Tier, number> = { comfortable: 0, unknown: 1, tight: 
 const NO_ELIGIBLE_REASON = '참석할 수 있는 캐릭터가 없어요';
 const NO_LAYOUT_REASON = '공대를 짤 수 없어요. 클리어 표시나 참석자를 바꿔 보세요.';
 
-/** 탐색량: 초기 배정 횟수, 국소 개선 반복 상한, 초기 배정 백트래킹 상한, 이웃 배정 수 상한. */
-const RESTARTS = 16;
+/**
+ * 탐색량: 초기 배정 횟수, 국소 개선 반복 상한, 초기 배정 백트래킹 상한, 이웃 배정 수 상한,
+ * 개선이 막혔을 때 시도하는 점수 그대로인 이동(서포터 이동/교환) 수 상한.
+ * 캐릭터 수 n이 크면 조작 하나를 평가하는 값이 커지므로 재시작/시도 수를 줄인다
+ * (n ≤ 37: 16번/200번, 48: 12번/125번, 96: 6번/62번).
+ */
+const restartsFor = (n: number) => Math.max(6, Math.min(16, Math.floor(600 / n)));
+const kickLimitFor = (n: number) => Math.max(32, Math.min(200, Math.floor(6000 / n)));
 const MAX_PASSES = 40;
 const BUILD_STEP_BUDGET = 20_000;
 const NEIGHBOR_BUDGET = 4_000;
@@ -53,10 +59,15 @@ function rng(seed: number): () => number {
   };
 }
 
-interface Score { worst: number; imbalance: number; spread: number; }
+/** 점수: 최악 단계 → 그 단계인 공대 수 → imbalance → 평균 분산(동률 깨기). 작을수록 좋다. */
+interface Score { worst: number; worstCount: number; imbalance: number; spread: number; }
 const compareScore = (a: Score, b: Score) =>
-  a.worst - b.worst || (Math.abs(a.imbalance - b.imbalance) > EPS ? a.imbalance - b.imbalance : 0)
+  a.worst - b.worst || a.worstCount - b.worstCount
+  || (Math.abs(a.imbalance - b.imbalance) > EPS ? a.imbalance - b.imbalance : 0)
   || (Math.abs(a.spread - b.spread) > EPS ? a.spread - b.spread : 0);
+/** 분산(동률 깨기)을 뺀 비교. 점수 그대로인 조작 뒤의 개선은 이 기준으로 좋아질 때만 받아들인다. */
+const compareMain = (a: Score, b: Score) =>
+  a.worst - b.worst || a.worstCount - b.worstCount || (Math.abs(a.imbalance - b.imbalance) > EPS ? a.imbalance - b.imbalance : 0);
 
 /** 배정 상태: item → 공대. 공대별 친구 수/역할 수/딜러 전투력 합을 같이 들고 다닌다. */
 class Layout {
@@ -108,6 +119,7 @@ class Layout {
   score(): Score {
     const { P, raid } = this.ctx;
     let worst = 0;
+    let worstCount = 0;
     let max = -Infinity;
     let min = Infinity;
     let sum = 0;
@@ -116,7 +128,7 @@ class Layout {
     for (let p = 0; p < P; p++) {
       const avg = this.cpN[p] ? this.cpSum[p] / this.cpN[p] : null;
       const b = TIER_BADNESS[tierFor(avg, raid)];
-      if (b > worst) worst = b;
+      if (b > worst) { worst = b; worstCount = 1; } else if (b === worst) worstCount++;
       if (avg !== null) {
         if (avg > max) max = avg;
         if (avg < min) min = avg;
@@ -125,7 +137,7 @@ class Layout {
         n++;
       }
     }
-    return { worst, imbalance: n ? max - min : 0, spread: n ? sq / n - (sum / n) ** 2 : 0 };
+    return { worst, worstCount, imbalance: n ? max - min : 0, spread: n ? sq / n - (sum / n) ** 2 : 0 };
   }
   clone(): Layout {
     const l = new Layout(this.ctx);
@@ -210,16 +222,25 @@ function build(ctx: Ctx, mode: Mode, rand: () => number): Layout | null {
   return L;
 }
 
-/** 딜러 두 명 교환이 규칙을 지키는지. */
+/**
+ * 서로 다른 공대의 두 캐릭터 교환이 규칙을 지키는지. 역할이 달라도 된다(예: 같은 친구의 딜러와 서포터를
+ * 맞바꿔 강한 딜러 옆자리를 비우기): 교환 뒤 두 공대 모두 서포터/딜러 자리 수를 넘지 않고 같은 친구가 겹치지 않으면 된다.
+ */
 function canSwap(L: Layout, i: number, j: number): boolean {
-  const { items, F } = L.ctx;
+  const { items, F, supportSlots, dealerSlots } = L.ctx;
   const pa = L.assign[i];
   const pb = L.assign[j];
-  if (pa === pb || items[i].support !== items[j].support) return false;
-  const fi = items[i].friend;
-  const fj = items[j].friend;
-  if (fi === fj) return true;
-  return !L.has[pb * F + fi] && !L.has[pa * F + fj];
+  if (pa === pb) return false;
+  const a = items[i];
+  const b = items[j];
+  if (a.support !== b.support) {
+    // pa: a를 내보내고 b를 받는다 / pb: 반대
+    const into = (p: number, inSup: boolean) =>
+      inSup ? L.sup[p] + 1 <= supportSlots : L.deal[p] + 1 <= dealerSlots;
+    if (!into(pa, b.support) || !into(pb, a.support)) return false;
+  }
+  if (a.friend === b.friend) return true;
+  return !L.has[pb * F + a.friend] && !L.has[pa * F + b.friend];
 }
 
 function swap(L: Layout, i: number, j: number) {
@@ -239,24 +260,62 @@ function move(L: Layout, i: number, q: number) {
   L.place(i, q);
 }
 
-/** 딜러 교환/이동으로 점수(최악 단계 → imbalance → 평균 분산)가 좋아지는 동안 개선. */
+/** 점수가 바뀌지 않는 조작인지 (서포터끼리, 전투력 없는 캐릭터끼리). 일반 탐색에서는 건너뛴다. */
+const neutral = (items: Item[], i: number, j: number) => items[i].cp === items[j].cp && items[i].support === items[j].support;
+
+/**
+ * 공대 touched(1~2개)에 걸친 교환/이동 중 점수가 (분산 말고) 좋아지는 첫 조작을 적용한다. 적용했으면 새 점수, 없으면 null.
+ * 점수 그대로인 조작(서포터 이동 등) 뒤에 새로 가능해진 개선을 찾는 데 쓴다.
+ */
+function improveAround(L: Layout, touched: number[], cur: Score): Score | null {
+  const { items, P } = L.ctx;
+  const n = items.length;
+  for (let i = 0; i < n; i++) {
+    const inside = touched.includes(L.assign[i]);
+    if (inside) {
+      for (let j = 0; j < n; j++) {
+        if (i === j || neutral(items, i, j) || !canSwap(L, i, j)) continue;
+        swap(L, i, j);
+        const s = L.score();
+        if (compareMain(s, cur) < 0) return s;
+        swap(L, i, j);
+      }
+    }
+    if (items[i].cp === null) continue;
+    for (let q = 0; q < P; q++) {
+      if (!(inside || touched.includes(q)) || !canMove(L, i, q)) continue;
+      const from = L.assign[i];
+      move(L, i, q);
+      const s = L.score();
+      if (compareMain(s, cur) < 0) return s;
+      move(L, i, from);
+    }
+  }
+  return null;
+}
+
+/**
+ * 국소 개선: 모든 캐릭터(서포터 포함, 역할이 다른 교환 포함)의 교환/이동으로 점수(최악 단계 → 그 단계 공대 수 →
+ * imbalance → 분산)가 좋아지는 동안 반복한다. 더 좋아지지 않으면 점수 그대로인 서포터 이동/교환을 하나 해 보고
+ * 그 덕에 생긴 개선이 있을 때만 받아들인다(최대 kickLimitFor(n)번 시도). 받아들인 조작은 항상 점수를 낮추므로 끝난다.
+ */
 function improve(L: Layout): Score {
   const { items, P } = L.ctx;
-  const dealers = items.map((_, i) => i).filter((i) => !items[i].support && items[i].cp !== null);
+  const n = items.length;
+  const kickLimit = kickLimitFor(n);
   let cur = L.score();
   for (let pass = 0; pass < MAX_PASSES; pass++) {
     let improved = false;
-    for (let a = 0; a < dealers.length; a++) {
-      for (let b = a + 1; b < dealers.length; b++) {
-        const i = dealers[a];
-        const j = dealers[b];
-        if (items[i].cp === items[j].cp || !canSwap(L, i, j)) continue;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        if (neutral(items, i, j) || !canSwap(L, i, j)) continue;
         swap(L, i, j);
         const s = L.score();
         if (compareScore(s, cur) < 0) { cur = s; improved = true; } else swap(L, i, j);
       }
     }
-    for (const i of dealers) {
+    for (let i = 0; i < n; i++) {
+      if (items[i].cp === null) continue; // 서포터/전투력 없는 딜러 이동은 점수가 그대로
       for (let q = 0; q < P; q++) {
         if (!canMove(L, i, q)) continue;
         const from = L.assign[i];
@@ -265,7 +324,33 @@ function improve(L: Layout): Score {
         if (compareScore(s, cur) < 0) { cur = s; improved = true; } else move(L, i, from);
       }
     }
-    if (!improved) break;
+    if (improved) continue;
+    // 막혔다: 점수 그대로인 조작(전투력 없는 캐릭터의 이동, 그런 캐릭터끼리의 교환)으로 자리를 비워 본다.
+    let kicks = 0;
+    let kicked = false;
+    outer: for (let i = 0; i < n && kicks < kickLimit; i++) {
+      if (items[i].cp !== null) continue;
+      for (let q = 0; q < P && kicks < kickLimit; q++) {
+        if (!canMove(L, i, q)) continue;
+        kicks++;
+        const from = L.assign[i];
+        move(L, i, q);
+        const s = improveAround(L, [from, q], cur);
+        if (s) { cur = s; kicked = true; break outer; }
+        move(L, i, from);
+      }
+      for (let j = i + 1; j < n && kicks < kickLimit; j++) {
+        if (!neutral(items, i, j) || !canSwap(L, i, j)) continue;
+        kicks++;
+        const pa = L.assign[i];
+        const pb = L.assign[j];
+        swap(L, i, j);
+        const s = improveAround(L, [pa, pb], cur);
+        if (s) { cur = s; kicked = true; break outer; }
+        swap(L, i, j);
+      }
+    }
+    if (!kicked) break;
   }
   return cur;
 }
@@ -281,7 +366,8 @@ function search(ctx: Ctx): Found[] {
   };
   const rand = rng(0x5eed + ctx.items.length * 31 + ctx.P);
   const modes: Mode[] = ['strong-first', 'snake'];
-  for (let r = 0; r < RESTARTS; r++) {
+  const restarts = restartsFor(ctx.items.length);
+  for (let r = 0; r < restarts; r++) {
     const L = build(ctx, modes[r] ?? 'random', rand);
     if (!L) continue;
     add(L, L.score());
