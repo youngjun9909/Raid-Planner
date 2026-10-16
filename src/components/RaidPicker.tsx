@@ -3,18 +3,26 @@
 import type { Friend } from '@/core/types';
 import { RAID_GROUPS, formatRange } from '@/lib/view-model';
 
+export const NO_CANDIDATE_TEXT = '갈 수 있는 캐릭터 없음';
+
+/**
+ * 레이드와 참석자 고르기. 난이도 칩마다 참석하는 친구 중 갈 수 있는 캐릭터 수를 보여 주고 (counts: 레이드 id → 수),
+ * 수가 0인 난이도는 비활성으로 "없음"을 표시한다. 이미 고른 난이도가 0이 되면 선택은 그대로 두고(다시 끌 수 있게) 안내를 보인다.
+ */
 export function RaidPicker({
   selected,
   onToggleRaid,
   friends,
   absent,
   onToggleFriend,
+  counts,
 }: {
   selected: string[];
   onToggleRaid: (raidId: string) => void;
   friends: Friend[];
   absent: Set<string>;
   onToggleFriend: (friendId: string) => void;
+  counts: Record<string, number>;
 }) {
   return (
     <div className="picker">
@@ -25,21 +33,43 @@ export function RaidPicker({
             <span className="raid-row__name">{g.name}</span>
             <span className="raid-row__size muted">{g.raids[0].size}인</span>
             <div className="chips">
-              {g.raids.map((r) => (
-                <label key={r.id} className="chip" title={`입장 ${r.minLevel}, 권장 전투력 ${formatRange(r)}`}>
-                  <input
-                    type="checkbox"
-                    className="chip__input"
-                    checked={selected.includes(r.id)}
-                    onChange={() => onToggleRaid(r.id)}
-                    aria-label={`${g.name} ${r.difficulty}`}
-                  />
-                  <span className="chip__face">
-                    {r.difficulty}
-                    <span className="chip__meta num">{r.minLevel}</span>
-                  </span>
-                </label>
-              ))}
+              {g.raids.map((r) => {
+                const n = counts[r.id] ?? 0;
+                const checked = selected.includes(r.id);
+                const empty = n === 0;
+                const hintId = `pick-hint-${r.id}`;
+                const hint = empty ? NO_CANDIDATE_TEXT : `갈 수 있는 캐릭터 ${n}개`;
+                return (
+                  <label
+                    key={r.id}
+                    className={`chip${empty ? ' chip--empty' : ''}${empty && checked ? ' chip--stranded' : ''}`}
+                    title={`입장 ${r.minLevel}, 권장 전투력 ${formatRange(r)}${empty ? ` · ${NO_CANDIDATE_TEXT}` : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="chip__input"
+                      checked={checked}
+                      disabled={empty && !checked}
+                      onChange={() => onToggleRaid(r.id)}
+                      aria-label={`${g.name} ${r.difficulty}`}
+                      aria-describedby={hintId}
+                    />
+                    <span className="chip__face">
+                      {r.difficulty}
+                      {!(empty && checked) && (
+                        <span className="chip__count num" aria-hidden="true">
+                          {' · '}
+                          {empty ? '없음' : n}
+                        </span>
+                      )}
+                      <span id={hintId} className={empty && checked ? 'chip__hint' : 'visually-hidden'}>
+                        {empty && checked && <span aria-hidden="true">{' · '}</span>}
+                        {hint}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
             </div>
           </div>
         ))}

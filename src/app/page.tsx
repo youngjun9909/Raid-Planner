@@ -6,7 +6,7 @@ import type { ClearRecord, Friend, Proficiency, Role } from '@/core/types';
 import { proficiencyKey } from '@/core/proficiency';
 import { targetDifficultyKey } from '@/core/difficulty';
 import { ApiError, api, type ClearInput } from '@/lib/api-client';
-import { applyClearChange, recordsAfterChange, withProficiency, withTargetDifficulty } from '@/lib/view-model';
+import { applyClearChange, candidateCounts, recordsAfterChange, withProficiency, withTargetDifficulty } from '@/lib/view-model';
 import { createSaveQueue } from '@/lib/save-queue';
 import { PasswordGate, readStoredPassword, storePassword } from '@/components/PasswordGate';
 import { FriendsPanel } from '@/components/FriendsPanel';
@@ -165,6 +165,8 @@ export default function Home() {
   }
 
   const attendeeIds = useMemo(() => (friends ?? []).filter((f) => !absent.has(f.id)).map((f) => f.id), [friends, absent]);
+  // 레이드 고르기 칩의 후보 수: 참석자 · 클리어 · 가는 난이도가 바뀌면 바로 다시 센다 (서버 편성과 같은 자격 규칙).
+  const counts = useMemo(() => candidateCounts(friends ?? [], attendeeIds, clears), [friends, attendeeIds, clears]);
   const raidKey = raidIds.join(',');
   const attendeeKey = attendeeIds.join(',');
 
@@ -452,7 +454,7 @@ export default function Home() {
             <section className="panel" aria-labelledby="sec-pick">
               <div className="panel__head">
                 <h2 id="sec-pick" className="panel__title">레이드와 참석자</h2>
-                <p className="panel__hint muted">숫자는 입장 아이템 레벨이에요.</p>
+                <p className="panel__hint muted">난이도 옆 숫자는 참석하는 친구 중 그 난이도로 갈 수 있는 캐릭터 수예요. 입장 레벨은 아래 공대 후보 제목 옆에 나와요.</p>
               </div>
               <RaidPicker
                 selected={selected}
@@ -460,6 +462,7 @@ export default function Home() {
                 friends={friends}
                 absent={absent}
                 onToggleFriend={toggleFriend}
+                counts={counts}
               />
             </section>
 

@@ -826,3 +826,50 @@ describe('이번 주 클리어 친구 필터', () => {
     }
   });
 });
+
+describe('레이드 고르기: 후보가 있는 난이도만', () => {
+  const box = (name: string) => screen.getByRole('checkbox', { name }) as HTMLInputElement;
+  const person = (name: string) => within(screen.getByRole('group', { name: '참석하는 친구' })).getByRole('checkbox', { name });
+
+  it('난이도마다 갈 수 있는 캐릭터 수를 보여 주고, 없는 난이도는 "갈 수 있는 캐릭터 없음"으로 비활성', async () => {
+    await renderLoaded();
+    // 기본 픽스처는 모두 1730 → 세르카는 자동으로 하드
+    expect(box('세르카 하드')).toBeEnabled();
+    expect(box('세르카 하드')).toHaveAccessibleDescription('갈 수 있는 캐릭터 3개');
+    expect(box('세르카 하드').closest('label')).toHaveTextContent('하드 · 3');
+    for (const name of ['세르카 노말', '세르카 나이트메어', '지평의 성당 1단계', '벨가르딘 노말']) {
+      expect(box(name)).toBeDisabled();
+      expect(box(name)).toHaveAccessibleDescription('갈 수 있는 캐릭터 없음');
+    }
+    expect(box('지평의 성당 2단계')).toHaveAccessibleDescription('갈 수 있는 캐릭터 3개');
+  });
+
+  it('참석자, 클리어, 가는 난이도가 바뀌면 수가 바로 바뀐다', async () => {
+    FRIENDS[1].targetDifficulty = { '다라|세르카': '노말' };
+    try {
+      await renderLoaded();
+      expect(box('세르카 하드')).toHaveAccessibleDescription('갈 수 있는 캐릭터 2개');
+      expect(box('세르카 노말')).toHaveAccessibleDescription('갈 수 있는 캐릭터 1개');
+      fireEvent.click(person('민수'));
+      expect(box('세르카 노말')).toBeDisabled();
+      fireEvent.click(chip('가나', '세르카'));
+      expect(box('세르카 하드')).toHaveAccessibleDescription('갈 수 있는 캐릭터 1개');
+    } finally {
+      delete FRIENDS[1].targetDifficulty;
+    }
+  });
+
+  it('고른 난이도의 후보가 모두 사라져도 선택은 그대로 두고 안내를 보여 준다', async () => {
+    await renderLoaded();
+    fireEvent.click(box('세르카 하드'));
+    expect(box('세르카 하드')).toBeChecked();
+    for (const c of ['가나', '가나서폿', '다라']) fireEvent.click(chip(c, '세르카'));
+    expect(box('세르카 하드')).toBeChecked();
+    expect(box('세르카 하드')).toBeEnabled(); // 다시 끌 수 있게
+    expect(box('세르카 하드')).toHaveAccessibleDescription('갈 수 있는 캐릭터 없음');
+    expect(box('세르카 하드').closest('label')).toHaveTextContent('갈 수 있는 캐릭터 없음');
+    fireEvent.click(box('세르카 하드'));
+    expect(box('세르카 하드')).not.toBeChecked();
+    expect(box('세르카 하드')).toBeDisabled();
+  });
+});

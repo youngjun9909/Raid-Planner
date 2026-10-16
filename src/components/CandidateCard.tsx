@@ -4,6 +4,7 @@ import { getRaid } from '@/core/raids';
 import { arrangeParty } from '@/lib/arrange-party';
 import { ROLE_LABEL, formatCP, formatLevel, planSummaryText } from '@/lib/view-model';
 import { TierBadge } from './TierBadge';
+import { UnplacedList } from './UnplacedList';
 import { ProficiencyBadge, ProficiencySummaryLine } from './ProficiencyBadge';
 import { DEFAULT_PROFICIENCY, partyProficiency, showProficiencyBadge } from '@/core/proficiency';
 
@@ -66,7 +67,10 @@ function PartyBlock({ party, index, rank, names, size, tracked }: {
   );
 }
 
-/** 추천 하나 = 완성된 편성. 요약 한 줄 아래에 1공대, 2공대, …를 반응형 그리드(넓으면 2~3열, 좁으면 1열)로 놓는다. */
+/**
+ * 추천 하나 = 완성된 편성. 요약 한 줄 아래에 1공대, 2공대, …를 반응형 그리드(넓으면 2~3열, 좁으면 1열)로 놓고,
+ * 그 아래에 이번 추천에서 편성되지 못한 후보 캐릭터(unplaced)를 보여 준다.
+ */
 export function CandidateCard({
   candidate,
   rank,
@@ -106,6 +110,7 @@ export function CandidateCard({
           <PartyBlock key={i} party={p} index={i} rank={rank} names={names} size={size} tracked={proficiencyTracked} />
         ))}
       </div>
+      <UnplacedList unplaced={candidate.unplaced ?? []} names={names} rank={rank} />
       {candidate.parties.length > 1 && candidate.imbalance > 0 && (
         <footer className="candidate__foot muted">공대 간 딜러 평균 차이 {formatCP(candidate.imbalance)}</footer>
       )}

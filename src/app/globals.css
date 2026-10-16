@@ -1064,11 +1064,6 @@ select {
   border: 1.5px solid var(--text-muted);
 }
 
-.chip__meta {
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-}
-
 .chip:hover .chip__face {
   border-color: var(--accent);
 }
@@ -1084,14 +1079,66 @@ select {
   border-color: var(--accent-ink);
 }
 
-.chip__input:checked + .chip__face .chip__meta {
-  color: inherit;
-  opacity: 0.75;
-}
-
-.chip__input:focus-visible + .chip__face {
+.chip__input:checked + .chip__face .chip__input:focus-visible + .chip__face {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+.chip__count {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.chip__input:checked + .chip__face .chip__count {
+  color: inherit;
+}
+
+/* 갈 수 있는 캐릭터가 없는 난이도: 비활성, 점선 */
+.chip--empty {
+  cursor: not-allowed;
+}
+
+.chip--empty .chip__input {
+  cursor: not-allowed;
+}
+
+.chip--empty .chip__face {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.chip--empty:hover .chip__face {
+  border-color: var(--line-strong);
+}
+
+/* 고른 뒤에 후보가 모두 사라진 난이도: 선택은 남기고 안내를 붙인다 (다시 눌러 끌 수 있다) */
+.chip--stranded {
+  cursor: pointer;
+}
+
+.chip--stranded .chip__input {
+  cursor: pointer;
+}
+
+.chip--stranded .chip__face {
+  border-style: dashed;
+}
+
+.chip__hint {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ---------- 이번 주 클리어: 친구 필터 ---------- */
@@ -1471,6 +1518,49 @@ select {
 .member--external .member__who {
   grid-column: 2 / -1;
   font-style: italic;
+}
+
+/* 이번에 못 간 캐릭터 (추천마다 공대 아래) */
+.unplaced {
+  display: grid;
+  gap: var(--s1);
+  padding: var(--s3) var(--s5);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+
+.unplaced__title {
+  line-height: 1.45;
+}
+
+.unplaced__label {
+  font-weight: 600;
+}
+
+.unplaced__why {
+  font-size: var(--fs-xs);
+}
+
+.unplaced__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.unplaced__friend {
+  font-weight: 700;
+}
+
+.unplaced__chars {
+  color: var(--text-muted);
+}
+
+.unplaced__more {
+  justify-self: start;
+  min-height: 40px;
+  padding-inline: 0;
 }
 
 .candidate__foot {
