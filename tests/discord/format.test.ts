@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   clipLines, clipText, embedSize, errorParts, fitEmbeds, fitMessage, formatHelp, formatPlan, formatStatus, gauge,
   characterClearsEmbed, registerSuccess, BLOCK_SEPARATOR, raidTitle, sanitizeEmbed, LIMITS, MAX_CONTENT, TIER_TEXT,
+  unplacedFieldValue, UNPLACED_NOTE,
 } from '@/discord/format';
 import { COLOR, ICON, TIER_COLOR } from '@/discord/theme';
 import { COMMANDS } from '@/discord/commands';
@@ -314,6 +315,109 @@ describe('formatPlan', () => {
     expect(shown).toBeGreaterThan(0);
     expect(shown).toBeLessThan(32);
     expect(m16.embeds[0].description).toContain(`공대 32개 중 ${shown}개만 보여요`);
+  });
+});
+
+describe('formatPlan: 이번에 못 간 캐릭터 / 모두 편성', () => {
+  const raid = getRaid('kazeros-hard')!;
+  const longRoster = () => {
+    const roles: Character['role'][] = ['dealer', 'dealer', 'support', 'dealer', 'support', 'dealer'];
+    return Array.from({ length: 8 }, (_, f) => fr(`f${f}`, `아주아주긴친구표시이름${f}번째`,
+      roles.map((role, k) => ch(`캐릭터이름이엄청나게긴캐릭터${f}-${k}`, role, 123456 + f * 1000 + k, 1765.83))));
+  };
+  const roster = longRoster();
+  const base = planRaid({ raid, friends: roster, clears: [], attendeeIds: roster.map((f) => f.id) });
+  const names = new Map(roster.map((f) => [f.id, f.displayName]));
+  const unplacedMany = roster.flatMap((f) => f.characters.map((c) => ({ friendId: f.id, characterName: `못간${c.name}` })));
+  const withUnplaced = (c: Candidate, unplaced: Candidate['unplaced']): Candidate => ({ ...c, unplaced });
+  const alt = (c: Candidate): Candidate => ({
+    ...c, kind: 'fullPlacement', unplaced: [],
+    summary: { ...c.summary, extraExternalVsBest: 3, extraPlacedVsBest: 2 },
+  });
+
+  it('unplacedFieldValue: 친구별 한 줄 + 설명, 없으면 null', () => {
+    expect(unplacedFieldValue([], names)).toBeNull();
+    const v = unplacedFieldValue([
+      { friendId: 'f0', characterName: '가' }, { friendId: 'f1', characterName: '나' }, { friendId: 'f0', characterName: '다' },
+    ], names)!;
+    expect(v.split('\n')).toEqual(['아주아주긴친구표시이름0번째 가, 다', '아주아주긴친구표시이름1번째 나', UNPLACED_NOTE]);
+  });
+
+  it('unplacedFieldValue: 길면 들어가는 만큼만 보이고 "외 N개", 설명은 늘 남고, 한도(1024, 예산)를 넘지 않는다', () => {
+    for (const budget of [1024, 600, 380, 120]) {
+      const v = unplacedFieldValue(unplacedMany, names, budget)!;
+      expect(v.length).toBeLessThanOrEqual(budget);
+      expect(v.endsWith(UNPLACED_NOTE)).toBe(true);
+      const m = v.match(/외 (\d+)개/);
+      const listed = v.split('\n').filter((l) => l.startsWith('아주아주')).reduce((n, l) => n + l.split(', ').length, 0);
+      expect(m ? Number(m[1]) : 0).toBe(unplacedMany.length - listed);
+    }
+  });
+
+  it('추천 임베드에 "이번에 못 간 캐릭터" 칸이 공대 칸 뒤에 붙고, 모두 편성은 칸이 없다', () => {
+    const plan: PlanResult = { candidates: [withUnplaced(base.candidates[0], unplacedMany.slice(0, 3)), { ...alt(base.candidates[1]), parties: base.candidates[1].parties.slice(0, 2) }], excluded: [] };
+    const msg = formatPlan(raid, plan, roster, NOW);
+    expectValidEmbeds(msg.embeds);
+    expect(msg.embeds).toHaveLength(2);
+    const last = msg.embeds[0].fields!.at(-1)!;
+    expect(last.name).toBe('이번에 못 간 캐릭터');
+    expect(last.value).toContain('아주아주긴친구표시이름0번째 못간캐릭터이름이엄청나게긴캐릭터0-0');
+    expect(last.value).toContain(UNPLACED_NOTE);
+    expect(msg.embeds[1].fields!.some((f) => f.name === '이번에 못 간 캐릭터')).toBe(false);
+  });
+
+  it('작은 입력: 모두 편성 임베드 제목(⭐ 없음), 비교 줄이 설명 맨 앞, 없는 숫자는 뺀다, content에 모두 편성 표시', () => {
+    const small = fr('a', '철수', [ch('A1', 'dealer', 3800, 1735), ch('A2', 'dealer', 3000, 1735)]);
+    const p = planRaid({ raid: serkaHard, friends: [small], clears: [], attendeeIds: ['a'] });
+    const c = p.candidates[0];
+    const full = (extra: Partial<Candidate['summary']>): Candidate => ({ ...c, kind: 'fullPlacement', summary: { ...c.summary, ...extra } });
+    const both = formatPlan(serkaHard, { candidates: [c, full({ extraExternalVsBest: 3, extraPlacedVsBest: 2 })], excluded: [] }, [small], NOW);
+    expectValidEmbeds(both.embeds);
+    expect(both.embeds.map((e) => e.title)).toEqual(['⭐ 추천 1 · 세르카 하드', '모두 편성 · 세르카 하드']);
+    const d = both.embeds[1].description!.split('\n');
+    expect(d[0]).toBe('추천보다 외부 3명 더 필요 · 캐릭터 2개 더 편성');
+    expect(d[1]).toMatch(/^친구 \d+명 · 캐릭터 \d+개 편성 · 공대 \d+개/);
+    expect(both.content).toBe('🏰 세르카 하드 공대 추천 1개와 모두 편성 1개를 찾았어요');
+    const onlyPlaced = formatPlan(serkaHard, { candidates: [c, full({ extraExternalVsBest: 0, extraPlacedVsBest: 1 })], excluded: [] }, [small], NOW);
+    expect(onlyPlaced.embeds[1].description!.split('\n')[0]).toBe('추천보다 캐릭터 1개 더 편성');
+    const none = formatPlan(serkaHard, { candidates: [c, full({})], excluded: [] }, [small], NOW);
+    expect(none.embeds[1].description).not.toContain('추천보다');
+  });
+
+  it('추천 번호는 추천만 센다 (추천 1, 추천 2, 모두 편성)', () => {
+    const plan: PlanResult = { candidates: [base.candidates[0], base.candidates[1], alt(base.candidates[2])], excluded: [] };
+    const titles = formatPlan(raid, plan, roster, NOW).embeds.map((e) => e.title);
+    expect(titles[0]).toBe(`⭐ 추천 1 · ${raidTitle(raid)}`);
+    expect(titles.every((t) => !t!.startsWith('추천 3') && !t!.includes('⭐ 모두'))).toBe(true);
+  });
+
+  it('최악의 경우(공대 8개 + 못 간 캐릭터 48개 + 모두 편성)도 제한 안, 공대는 다 보이고, 모두 편성은 추천 1보다 먼저 빠지며 그 사실을 알린다', () => {
+    const plan: PlanResult = {
+      candidates: [withUnplaced(base.candidates[0], unplacedMany), base.candidates[1], alt(base.candidates[2])],
+      excluded: Array.from({ length: 30 }, (_, i) => ({ friendId: `x${i}`, reason: '가능한 캐릭터 없음' })),
+    };
+    const msg = formatPlan(raid, plan, roster, NOW);
+    expectValidEmbeds(msg.embeds);
+    expect(msg.embeds[0].title).toBe(`⭐ 추천 1 · ${raidTitle(raid)}`);
+    expect(msg.embeds[0].fields!.filter((f) => /^\d+공대/.test(f.name))).toHaveLength(8);
+    expect(msg.embeds.some((e) => e.title?.startsWith('모두 편성'))).toBe(false);
+    expect(msg.content).toContain('모두 편성은 길어서 뺐어요');
+    // 못 간 캐릭터는 가능한 만큼 보이거나, 못 넣었다면 설명에 적힌다
+    const field = msg.embeds[0].fields!.find((f) => f.name === '이번에 못 간 캐릭터');
+    expect(field !== undefined || msg.embeds[0].description!.includes('못 간 캐릭터 48개는 길어서 뺐어요')).toBe(true);
+  });
+
+  it('공대가 아주 많으면(4인 공대 32개) 못 간 캐릭터 칸을 먼저 빼고, 설명에 적고, 칸 25개 제한을 지킨다', () => {
+    const r = getRaid('serka-nightmare')!;
+    const sixteen = [...longRoster(), ...longRoster().map((f) => ({ ...f, id: `${f.id}b`, characters: f.characters.map((c) => ({ ...c, name: `${c.name}b` })) }))];
+    const p = planRaid({ raid: r, friends: sixteen, clears: [], attendeeIds: sixteen.map((f) => f.id) });
+    const plan: PlanResult = { candidates: [withUnplaced(p.candidates[0], unplacedMany), alt(p.candidates[1])], excluded: [] };
+    const msg = formatPlan(r, plan, sixteen, NOW);
+    expectValidEmbeds(msg.embeds);
+    expect(msg.embeds[0].title).toBe(`⭐ 추천 1 · ${raidTitle(r)}`);
+    expect(msg.embeds.some((e) => e.title?.startsWith('모두 편성'))).toBe(false);
+    expect(msg.embeds[0].fields!.some((f) => f.name === '이번에 못 간 캐릭터')).toBe(false);
+    expect(msg.embeds[0].description).toContain('못 간 캐릭터 48개는 길어서 뺐어요');
   });
 });
 

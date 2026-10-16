@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { CandidateCard } from '@/components/CandidateCard';
 import { PlanBoard } from '@/components/PlanBoard';
+import { getRaid } from '@/core/raids';
 import type { Candidate, Friend, Slot } from '@/core/types';
 
 afterEach(cleanup);
@@ -65,6 +66,7 @@ describe('PlanBoard: 번호는 추천만 센다', () => {
     const data = {
       candidates: [cand('recommended'), cand('recommended'), cand('fullPlacement', { ext: 1, placed: 1 })],
       excluded: [],
+      raid: getRaid('serka-hard')!,
     };
     render(<PlanBoard raidIds={['serka-hard']} plans={{ 'serka-hard': { status: 'ready', data } }} friends={friends} hasAttendees />);
     expect(screen.getAllByRole('heading', { level: 4 }).map((h) => h.textContent)).toEqual(['⭐추천 1', '추천 2', '모두 편성']);
@@ -75,7 +77,7 @@ describe('PlanBoard: 번호는 추천만 센다', () => {
   });
 
   it('추천이 하나일 때도 대안은 모두 편성', () => {
-    const data = { candidates: [cand('recommended'), cand('fullPlacement', { placed: 1 })], excluded: [] };
+    const data = { candidates: [cand('recommended'), cand('fullPlacement', { placed: 1 })], excluded: [], raid: getRaid('serka-hard')! };
     render(<PlanBoard raidIds={['serka-hard']} plans={{ 'serka-hard': { status: 'ready', data } }} friends={friends} hasAttendees />);
     expect(screen.getAllByRole('heading', { level: 4 }).map((h) => h.textContent)).toEqual(['⭐추천 1', '모두 편성']);
   });

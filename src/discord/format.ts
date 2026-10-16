@@ -4,7 +4,7 @@
  */
 import { RAIDS } from '@/core/raids';
 import { weekKey } from '@/core/week';
-import type { Candidate, Character, ClearRecord, Friend, Party, PlanResult, Proficiency, RaidConfig, Slot, Tier } from '@/core/types';
+import type { Candidate, Character, ClearRecord, Friend, Party, PlanResult, Proficiency, RaidConfig, Slot, Tier, UnplacedCharacter } from '@/core/types';
 import { DEFAULT_PROFICIENCY, NO_EXPERT_TEXT, partyProficiency, proficiencySummaryText, showProficiencyBadge } from '@/core/proficiency';
 import { visibleFriend } from '@/core/visible';
 import { countExternals, formatCP, formatLevel, formatRange, planSummaryText } from '@/lib/view-model';
@@ -245,25 +245,82 @@ export function planButtons(raid: RaidConfig): ActionRow {
   };
 }
 
-interface EmbedOpts { detail: Detail; shown?: number; tracked: boolean; }
+/** "이번에 못 간 캐릭터" 칸 이름과 설명. */
+export const UNPLACED_FIELD_NAME = '이번에 못 간 캐릭터';
+export const UNPLACED_NOTE = '외부인이 많이 필요해서 이번 추천에서 뺐어요';
 
-/** 추천 하나 = 임베드 하나: 제목 "⭐ 추천 1 · 세르카 하드", 설명 = 요약 한 줄, 공대마다 칸 하나. */
-function candidateEmbed(c: Candidate, i: number, raid: RaidConfig, names: Map<string, string>, excluded: string, now: Date, opts: EmbedOpts): Embed {
+/** "모두 편성" 임베드 제목 앞부분. */
+export const FULL_PLACEMENT_TITLE = '모두 편성';
+
+/**
+ * 못 간 캐릭터 칸의 값: 친구별 한 줄 "<친구> <캐릭터>, <캐릭터>", 길면 들어가는 만큼만 보이고 "외 N개",
+ * 마지막 줄은 늘 설명. 전체 길이는 budget(≤1024)을 넘지 않는다. 비어 있으면 null.
+ */
+export function unplacedFieldValue(unplaced: UnplacedCharacter[], names: Map<string, string>, budget: number = LIMITS.fieldValue): string | null {
+  if (unplaced.length === 0) return null;
+  const max = Math.min(budget, LIMITS.fieldValue);
+  const groups: { friendId: string; chars: string[] }[] = [];
+  for (const u of unplaced) {
+    const g = groups.find((x) => x.friendId === u.friendId);
+    if (g) g.chars.push(u.characterName);
+    else groups.push({ friendId: u.friendId, chars: [u.characterName] });
+  }
+  const tail = (rest: number) => `${rest > 0 ? `외 ${rest}개\n` : ''}${UNPLACED_NOTE}`;
+  // 캐릭터를 하나씩 넣어 가며, 그 뒤에 "외 N개"와 설명을 붙여도 max 안인지 매번 확인한다.
+  const lines: string[] = [];
+  let shown = 0;
+  const fits = (candidate: string[], count: number) => `${candidate.join('\n')}\n${tail(unplaced.length - count)}`.length <= max;
+  outer: for (const g of groups) {
+    const who = clipText(names.get(g.friendId) ?? '알 수 없음', 40);
+    let line = '';
+    for (const c of g.chars) {
+      const next = line ? `${line}, ${clipText(c, 40)}` : `${who} ${clipText(c, 40)}`;
+      if (!fits([...lines, next], shown + 1)) {
+        if (line) lines.push(line);
+        break outer;
+      }
+      line = next;
+      shown++;
+    }
+    lines.push(line);
+  }
+  return `${lines.length ? `${lines.join('\n')}\n` : ''}${tail(unplaced.length - shown)}`;
+}
+
+interface EmbedOpts { detail: Detail; shown?: number; tracked: boolean; dropUnplaced?: boolean; }
+
+/** 못 간 캐릭터 칸에 줄 수 있는 글자 수 (분량 단계가 높을수록 짧게). */
+const UNPLACED_BUDGET: Record<Detail, number> = { 0: 900, 1: 600, 2: 380 };
+
+/**
+ * 추천 하나 = 임베드 하나: 제목 "⭐ 추천 1 · 세르카 하드"(추천만 번호를 센다) 또는 "모두 편성 · 세르카 하드",
+ * 설명 = (모두 편성이면 비교 줄) + 요약 한 줄, 공대마다 칸 하나, 추천에는 못 간 캐릭터 칸.
+ */
+function candidateEmbed(c: Candidate, i: number, number: number, raid: RaidConfig, names: Map<string, string>, excluded: string, now: Date, opts: EmbedOpts): Embed {
+  const full = c.kind === 'fullPlacement';
+  const unplacedValue = full || opts.dropUnplaced ? null : unplacedFieldValue(c.unplaced ?? [], names, UNPLACED_BUDGET[opts.detail]);
+  const fieldRoom = LIMITS.fields - (unplacedValue ? 1 : 0);
   const shown = Math.min(opts.shown ?? c.parties.length, c.parties.length);
-  const spacers = opts.detail === 0 && shown * 2 - 1 <= LIMITS.fields;
+  const spacers = opts.detail === 0 && shown * 2 - 1 <= fieldRoom;
   const fields: EmbedField[] = [];
   c.parties.slice(0, shown).forEach((p, j) => {
     if (j > 0 && spacers) fields.push(SPACER);
     fields.push(partyField(p, j, raid, names, opts.detail, opts.tracked));
   });
+  if (unplacedValue) fields.push({ name: UNPLACED_FIELD_NAME, value: unplacedValue });
+  const extra = c.summary.extraExternalVsBest ?? 0;
+  const placed = c.summary.extraPlacedVsBest ?? 0;
+  const compare = [...(extra > 0 ? [`외부 ${extra}명 더 필요`] : []), ...(placed > 0 ? [`캐릭터 ${placed}개 더 편성`] : [])];
   const description = [
+    ...(full && compare.length ? [`추천보다 ${compare.join(' · ')}`] : []),
     planSummaryText(c.summary),
     `권장 전투력 ${formatRange(raid)}`,
     ...(shown < c.parties.length ? [`공대 ${c.parties.length}개 중 ${shown}개만 보여요 (길어서 줄였어요). 전체는 웹 화면에서 볼 수 있어요.`] : []),
+    ...(opts.dropUnplaced && (c.unplaced?.length ?? 0) > 0 ? [`이번에 못 간 캐릭터 ${c.unplaced.length}개는 길어서 뺐어요. 웹 화면에서 볼 수 있어요.`] : []),
     ...(i === 0 && excluded ? [excluded] : []),
   ].join('\n');
   return frame(now, `${ICON.party} 공대 추천`, {
-    title: `${i === 0 ? `${ICON.star} ` : ''}추천 ${i + 1} · ${raidTitle(raid)}`,
+    title: full ? `${FULL_PLACEMENT_TITLE} · ${raidTitle(raid)}` : `${number === 1 ? `${ICON.star} ` : ''}추천 ${number} · ${raidTitle(raid)}`,
     color: TIER_COLOR[worstTier(c.parties)],
     description,
     fields,
@@ -279,26 +336,37 @@ function fitsAsIs(e: Embed): boolean {
 
 /**
  * 추천 임베드를 메시지 제한(임베드 합계 6000자, 칸 25개, 칸 1024자) 안에 맞춘다.
- * 분량 단계를 올려 가며 추천 전부가 들어가는 단계를 찾고, 가장 짧게 해도 안 되면 앞에서부터 들어가는 추천만 남긴다.
- * 첫 추천 하나도 안 들어가면 공대를 뒤에서부터 줄이고 설명에 그 사실을 적는다 (공대가 말없이 잘리지 않게).
+ * 분량 단계를 올려 가며 전부(추천 + "모두 편성")가 들어가는 단계를 찾고, 안 되면 "모두 편성"을 먼저 뺀 채 다시 단계를 올려 본다
+ * (추천 1보다 먼저 빠진다). 그래도 안 되면 앞에서부터 들어가는 추천만 남긴다.
+ * 첫 추천 하나도 안 들어가면 못 간 캐릭터 칸을 먼저 빼고, 그래도 안 되면 공대를 뒤에서부터 줄이고 설명에 그 사실을 적는다.
  */
 function planEmbeds(result: PlanResult, raid: RaidConfig, names: Map<string, string>, excluded: string, now: Date): Embed[] {
   const tracked = result.proficiencyTracked === true;
-  const make = (c: Candidate, i: number, opts: Omit<EmbedOpts, 'tracked'>) => candidateEmbed(c, i, raid, names, excluded, now, { ...opts, tracked });
-  const total = (es: Embed[]) => es.reduce((s, e) => s + embedSize(e), 0);
   const cands = result.candidates.slice(0, LIMITS.embeds);
-  for (const detail of [0, 1, 2] as Detail[]) {
-    const es = cands.map((c, i) => make(c, i, { detail }));
-    if (es.every(fitsAsIs) && total(es) <= LIMITS.embedTotal) return es;
+  const numberOf = (i: number) => cands.slice(0, i + 1).filter((c) => c.kind !== 'fullPlacement').length;
+  const make = (c: Candidate, i: number, opts: Omit<EmbedOpts, 'tracked'>) => candidateEmbed(c, i, numberOf(i), raid, names, excluded, now, { ...opts, tracked });
+  const total = (es: Embed[]) => es.reduce((s, e) => s + embedSize(e), 0);
+  // 같은 객체가 여러 번 나올 수 있으므로 위치(i)를 같이 들고 다닌다
+  const all = cands.map((c, i) => ({ c, i }));
+  const recs = all.filter(({ c }) => c.kind !== 'fullPlacement');
+  for (const list of recs.length < all.length ? [all, recs] : [all]) {
+    for (const detail of [0, 1, 2] as Detail[]) {
+      const es = list.map(({ c, i }) => make(c, i, { detail }));
+      if (es.every(fitsAsIs) && total(es) <= LIMITS.embedTotal) return es;
+    }
   }
   const out: Embed[] = [];
-  for (const [i, c] of cands.entries()) {
+  for (const { c, i } of recs) {
     const e = make(c, i, { detail: 2 });
     if (fitsAsIs(e) && total([...out, e]) <= LIMITS.embedTotal) { out.push(e); continue; }
-    if (i > 0) break;
-    let shown = Math.min(c.parties.length - 1, LIMITS.fields);
-    let cut = make(c, i, { detail: 2, shown });
-    while (shown > 1 && !(fitsAsIs(cut) && embedSize(cut) <= LIMITS.embedTotal)) cut = make(c, i, { detail: 2, shown: --shown });
+    if (out.length > 0) break;
+    const ok = (x: Embed) => fitsAsIs(x) && embedSize(x) <= LIMITS.embedTotal;
+    let cut = make(c, i, { detail: 2, dropUnplaced: true });
+    if (!ok(cut)) {
+      let shown = Math.min(c.parties.length - 1, LIMITS.fields);
+      cut = make(c, i, { detail: 2, shown, dropUnplaced: true });
+      while (shown > 1 && !ok(cut)) cut = make(c, i, { detail: 2, shown: --shown, dropUnplaced: true });
+    }
     out.push(cut);
     break;
   }
@@ -320,9 +388,13 @@ export function formatPlan(raid: RaidConfig, result: PlanResult, friends: Friend
     })], buttons);
   }
   const embeds = planEmbeds(result, raid, names, excluded, now);
-  const n = result.candidates.length;
-  const note = embeds.length < n ? ` (길어서 ${embeds.length}개만 보여요)` : '';
-  return parts(`${ICON.party} ${title} 공대 추천 ${n}개를 찾았어요${note}`, embeds, buttons);
+  const n = result.candidates.filter((c) => c.kind !== 'fullPlacement').length;
+  const hasFull = result.candidates.length > n;
+  const shownRecs = embeds.filter((e) => !e.title?.startsWith(FULL_PLACEMENT_TITLE)).length;
+  const fullShown = embeds.length > shownRecs;
+  const note = shownRecs < n ? ` (길어서 ${shownRecs}개만 보여요)` : '';
+  const droppedFull = hasFull && !fullShown ? `${note ? ' ' : ' ('}모두 편성은 길어서 뺐어요, 웹 화면에서 볼 수 있어요${note ? '' : ')'}` : '';
+  return parts(`${ICON.party} ${title} 공대 추천 ${n}개${hasFull ? '와 모두 편성 1개' : ''}를 찾았어요${note}${droppedFull}`, embeds, buttons);
 }
 
 // ---------- /현황, /클리어 ----------
