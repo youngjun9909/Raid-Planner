@@ -9,6 +9,12 @@ export interface Store {
   setManualCombatPower(friendId: string, characterName: string, cp: number | null): Promise<void>;
   /** 캐릭터 역할 수동 지정. null이면 지정을 지워 자동 판별로 돌아간다. */
   setManualRole(friendId: string, characterName: string, role: Role | null): Promise<void>;
+  /**
+   * 친구를 지운다: friend:<id>, friends 집합의 id, 수동 전투력/역할, 그리고 week 주에 기록된
+   * 그 친구 캐릭터들의 클리어. 지난 주 기록은 주간 작업이 지운다. 없는 친구면 false.
+   * (저장소는 시각을 모르므로 이번 주 key는 호출하는 쪽이 weekKey(now)로 넘긴다.)
+   */
+  deleteFriend(id: string, week: string): Promise<boolean>;
   getClears(week: string): Promise<ClearRecord[]>;
   setCharacterClears(week: string, characterName: string, records: Omit<ClearRecord, 'characterName'>[]): Promise<void>;
   deleteWeek(week: string): Promise<void>;
@@ -74,6 +80,17 @@ export function createMemoryStore(): Store {
       if (role === null) delete m[name]; else m[name] = role;
       roles.set(friendId, m);
     },
+    async deleteFriend(id, week) {
+      const f = friends.get(id);
+      if (!f) return false;
+      friends.delete(id);
+      manual.delete(id);
+      roles.delete(id);
+      const w = { ...(clears.get(week) ?? {}) };
+      for (const c of f.characters) delete w[c.name];
+      clears.set(week, w);
+      return true;
+    },
     async getClears(week) { return flattenClears(structuredClone(clears.get(week) ?? {})); },
     async setCharacterClears(week, name, records) {
       const w = { ...(clears.get(week) ?? {}) };
@@ -93,7 +110,7 @@ function parseJson<T>(v: unknown): T | undefined {
   return v as T;
 }
 
-// Redis methods used: get, set, del, sadd, smembers, hget, hset, hgetall, hdel
+// Redis methods used: get, set, del, sadd, srem, smembers, hget, hset, hgetall, hdel
 // Keys: friend:<id> (JSON), friends (set of ids), manual:<id> (hash name -> cp),
 //       role:<id> (hash name -> 'support'|'dealer'), clears:<week> (hash name -> JSON)
 export function createUpstashStore(redis: Redis): Store {
@@ -142,6 +159,16 @@ export function createUpstashStore(redis: Redis): Store {
     async setManualRole(friendId, name, role) {
       if (role === null) await redis.hdel(`role:${friendId}`, name);
       else await redis.hset(`role:${friendId}`, { [name]: role });
+    },
+    async deleteFriend(id, week) {
+      const f = await readFriend(id);
+      if (!f) return false;
+      const names = f.characters.map((c) => c.name);
+      if (names.length) await redis.hdel(`clears:${week}`, ...names);
+      await redis.del(`manual:${id}`, `role:${id}`);
+      await redis.srem('friends', id);
+      await redis.del(`friend:${id}`);
+      return true;
     },
     async getClears(week) {
       const raw = (await redis.hgetall(`clears:${week}`)) as Record<string, unknown> | null;

@@ -257,6 +257,22 @@ describe('planRaid', () => {
     expect(allCleared.reason).toBe('참석할 수 있는 캐릭터가 없어요');
   });
 
+  it('두 친구가 같은 캐릭터 이름을 가지면 먼저 나온 친구의 것만 쓴다 (한 후보에 같은 캐릭터가 두 번 나오지 않음)', () => {
+    const dup = makeFriends({
+      p: [['same', 'dealer', 1740, 4000], ['p-sup', 'support', 1740, 2500]],
+      q: [['same', 'dealer', 1740, 4000]],
+      r: [['r1', 'dealer', 1740, 3700]],
+    });
+    const res = planRaid({ raid: serkaHard, friends: dup, clears: [], attendeeIds: ['p', 'q', 'r'] });
+    expect(res.candidates.length).toBeGreaterThan(0);
+    for (const c of res.candidates) {
+      const names = c.parties.flatMap((p) => p.slots.flatMap((s) => (s.kind === 'friend' ? [s.character.name] : [])));
+      expect(new Set(names).size).toBe(names.length);
+      expect(c.parties.flatMap((p) => p.slots).some((s) => s.kind === 'friend' && s.friendId === 'q')).toBe(false);
+    }
+    expect(res.excluded).toEqual([{ friendId: 'q', reason: '가능한 캐릭터 없음' }]);
+  });
+
   it('참석자 0명이면 reason 없음, 후보가 있으면 reason 없음 [Fix 4]', () => {
     expect(planRaid({ raid: serkaHard, friends, clears, attendeeIds: [] }).reason).toBeUndefined();
     expect(planRaid({ raid: serkaHard, friends, clears, attendeeIds: ALL }).reason).toBeUndefined();

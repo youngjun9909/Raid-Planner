@@ -140,6 +140,28 @@ describe('handleInteraction', () => {
       expect(JSON.parse(fetchMock.mock.calls[0][1].body).content).toContain('다른 디스코드 계정');
     });
 
+    it('내 친구를 갱신하더라도 다른 친구의 캐릭터가 섞인 원정대는 거절한다', async () => {
+      await store.saveFriend(friendA);
+      await store.saveFriend({ ...friendB, discordUserId: undefined });
+      fetchRoster.mockResolvedValue([ch('NEW1'), ch('B2', 'support')]);
+      await (await run(cmd('등록', [{ name: '대표캐릭터', value: 'NEW1' }], 'u1'))).after!();
+      expect((await store.getFriend('fa'))!.representativeName).toBe('A1');
+      expect(await store.listFriends()).toHaveLength(2);
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.content).toContain('이미 다른 친구(영희)로 등록된 캐릭터');
+      expect(body.embeds[0].color).toBe(0xed4245);
+    });
+
+    it('다른 친구(디스코드 미연결)의 캐릭터 이름이면 로스터를 부르지 않고 거절한다 (이미 내 친구가 있을 때)', async () => {
+      await store.saveFriend(friendA);
+      await store.saveFriend({ id: 'web', displayName: '웹민수', representativeName: 'W1', characters: [ch('W1')] });
+      await (await run(cmd('등록', [{ name: '대표캐릭터', value: 'W1' }], 'u1'))).after!();
+      expect(fetchRoster).not.toHaveBeenCalled();
+      expect((await store.getFriend('fa'))!.representativeName).toBe('A1');
+      expect((await store.getFriend('web'))!.discordUserId).toBeUndefined();
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body).content).toContain('이미 다른 친구(웹민수)로 등록된 캐릭터');
+    });
+
     it('/등록에서 not_found면 "캐릭터를 찾을 수 없어요" 메시지', async () => {
       fetchRoster.mockRejectedValue(new LostArkError('not_found'));
       await (await run(cmd('등록', [{ name: '대표캐릭터', value: 'nobody' }]))).after!();

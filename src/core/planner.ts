@@ -167,9 +167,12 @@ export function planRaid(input: {
   const excluded: PlanResult['excluded'] = [];
   const pool: PoolMember[] = [];
   const attendees = new Set(attendeeIds);
+  // 방어: 두 친구에 같은 이름의 캐릭터가 있으면 먼저 나온 친구의 것만 쓴다 (한 후보에 같은 캐릭터가 두 번 놓이지 않게).
+  const claimed = new Set<string>();
   for (const f of friends) {
     if (!attendees.has(f.id)) continue;
-    const eligible = eligibleCharacters(f, raid, clears);
+    const eligible = eligibleCharacters(f, raid, clears).filter((c) => !claimed.has(c.name));
+    for (const c of eligible) claimed.add(c.name);
     if (eligible.length === 0) excluded.push({ friendId: f.id, reason: '가능한 캐릭터 없음' });
     else pool.push({ friendId: f.id, choices: pruneChoices(eligible) });
   }

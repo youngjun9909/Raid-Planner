@@ -6,6 +6,7 @@ import { planRaid } from '@/core/planner';
 import { weekKey } from '@/core/week';
 import type { ClearRecord, Friend, RaidConfig } from '@/core/types';
 import { applyClearChange, formatLevel } from '@/lib/view-model';
+import { findOwner } from '@/lib/friend-dupes';
 import { COMMANDS, raidTitle } from './commands';
 import {
   characterClearsEmbed, errorParts, formatHelp, formatPlan, formatStatus, registerSuccess,
@@ -43,6 +44,7 @@ const FIX = {
   registerFirst: '`/등록 대표캐릭터:홍길동`처럼 내 캐릭터 이름을 넣으면 돼요.',
   notMine: '`/클리어`를 직접 실행해서 내 캐릭터를 골라 주세요.',
   taken: '내 캐릭터가 맞다면 관리자에게 연결을 풀어 달라고 부탁해 주세요.',
+  otherFriend: '내 캐릭터가 맞다면 웹 화면에서 그 친구를 삭제한 뒤 다시 `/등록` 해 주세요.',
   noCharacters: '`/등록`을 다시 실행해서 원정대를 새로 불러와 주세요.',
   unknownRaid: '`/공대`에서 목록에 있는 레이드를 골라 주세요.',
 };
@@ -142,7 +144,14 @@ async function register(name: string, userId: string, displayName: string, deps:
   if (taken) return errorParts(`${name} 캐릭터는 이미 다른 디스코드 계정(${taken.displayName})에 연결되어 있어요`, FIX.taken, deps.now());
   // 이미 연결된 내 친구 → 같은 캐릭터의 미연결 친구(웹에서 등록) → 새 친구 순서로 고른다.
   const target = friends.find((f) => f.discordUserId === userId) ?? friends.find((f) => !f.discordUserId && owns(f));
+  // 내 친구(target)는 갱신할 수 있지만, 다른 친구의 캐릭터를 가져올 수는 없다 (클리어/배치가 캐릭터 이름으로 묶임).
+  const other = findOwner(friends, [name], target?.id);
+  if (other) return errorParts(`${name}은(는) 이미 다른 친구(${other.displayName})로 등록된 캐릭터예요`, FIX.otherFriend, deps.now());
   const characters = await deps.fetchRoster(name);
+  const overlap = findOwner(await deps.store.listFriends(), characters.map((c) => c.name), target?.id);
+  if (overlap) {
+    return errorParts(`불러온 원정대에 이미 다른 친구(${overlap.displayName})로 등록된 캐릭터가 있어요`, FIX.otherFriend, deps.now());
+  }
   const saved: Friend = target
     ? { ...target, discordUserId: userId, representativeName: name, characters }
     : { id: randomUUID(), displayName, discordUserId: userId, representativeName: name, characters };

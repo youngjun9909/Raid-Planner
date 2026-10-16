@@ -34,6 +34,7 @@ export const api = {
   listFriends: (pw: string) => call<Friend[]>(pw, '/api/friends'),
   addFriend: (pw: string, displayName: string, representativeName: string) =>
     call<Friend>(pw, '/api/friends', 'POST', { displayName, representativeName }),
+  deleteFriend: (pw: string, id: string) => call<{ ok: true }>(pw, `/api/friends/${encodeURIComponent(id)}`, 'DELETE'),
   refreshFriend: (pw: string, id: string) => call<Friend>(pw, friendUrl(id, 'refresh'), 'POST'),
   setCombatPower: (pw: string, id: string, characterName: string, cp: number | null) =>
     call<Friend>(pw, friendUrl(id, 'combat-power'), 'PUT', { characterName, cp }),

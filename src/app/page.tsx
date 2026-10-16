@@ -207,6 +207,27 @@ export default function Home() {
     }
   }
 
+  async function deleteFriend(id: string) {
+    if (!password) return '비밀번호가 필요해요';
+    const gone = friends?.find((f) => f.id === id);
+    try {
+      await api.deleteFriend(password, id);
+    } catch (e) {
+      return handle(e);
+    }
+    setFriends((prev) => (prev ?? []).filter((f) => f.id !== id));
+    if (gone) {
+      const names = new Set(gone.characters.map((c) => c.name));
+      commitClears(clearsRef.current.filter((c) => !names.has(c.characterName)));
+    }
+    setAbsent((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    return null;
+  }
+
   const toggleRaid = (id: string) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const toggleFriend = (id: string) =>
@@ -274,7 +295,7 @@ export default function Home() {
               <p className="muted">첫 친구의 이름과 대표 캐릭터를 넣어 시작하세요.</p>
             </div>
           )}
-          {friends && <FriendsPanel friends={friends} onAdd={addFriend} onRefresh={refreshFriend} />}
+          {friends && <FriendsPanel friends={friends} onAdd={addFriend} onRefresh={refreshFriend} onDelete={deleteFriend} />}
         </section>
 
         {friends && friends.length > 0 && (

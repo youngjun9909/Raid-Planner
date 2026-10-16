@@ -319,6 +319,17 @@ select {
   background: transparent;
 }
 
+.btn--danger {
+  color: var(--error);
+  border-color: var(--error);
+  background: transparent;
+  font-weight: 600;
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: var(--error-bg);
+}
+
 .btn--small {
   min-height: 36px;
   padding: 0 var(--s3);
@@ -481,6 +492,29 @@ select {
 .friend__name {
   font-size: var(--fs-base);
   font-weight: 600;
+}
+
+.friend__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s1);
+}
+
+.friend__confirm {
+  display: grid;
+  gap: var(--s2);
+  margin-top: var(--s2);
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--error);
+  border-radius: var(--radius);
+  background: var(--error-bg);
+}
+
+.friend__confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
 }
 
 .friends__form {

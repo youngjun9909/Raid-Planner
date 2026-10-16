@@ -48,6 +48,7 @@ beforeEach(() => {
         else Object.assign(c, { combatPower: body.cp, manualCombatPower: true });
         return json(f);
       }
+      if (url.startsWith('/api/friends/') && method === 'DELETE') return json({ ok: true });
       if (url.endsWith('/role')) {
         const f = structuredClone(FRIENDS[0]);
         const c = f.characters.find((x) => x.name === body.characterName)!;
@@ -213,6 +214,24 @@ describe('웹 화면', () => {
     await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/role'))).toHaveLength(2));
     expect(calls.filter((c) => c.url.endsWith('/role'))[1].body).toEqual({ characterName: '가나', role: null });
     expect(await screen.findByRole('button', { name: '가나 역할: 딜러 (자동). 누르면 서포터로 바꿔요' })).toBeInTheDocument();
+  });
+
+  it('친구 삭제는 확인을 한 번 더 받은 뒤 DELETE를 보내고 목록과 표에서 뺀다', async () => {
+    await renderLoaded();
+    fireEvent.click(screen.getByRole('button', { name: '영준 삭제' }));
+    // 아직 보내지 않는다: 확인 단계
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+    const confirm = screen.getByRole('group', { name: '영준 삭제 확인' });
+    expect(confirm).toHaveTextContent('영준의 원정대와 이번 주 클리어 기록을 지울까요?');
+    fireEvent.click(within(confirm).getByRole('button', { name: '취소' }));
+    expect(screen.queryByRole('group', { name: '영준 삭제 확인' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '영준 삭제' }));
+    fireEvent.click(within(screen.getByRole('group', { name: '영준 삭제 확인' })).getByRole('button', { name: '삭제하기' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true));
+    expect(calls.find((c) => c.method === 'DELETE')!.url).toBe('/api/friends/f1');
+    await waitFor(() => expect(screen.queryByRole('combobox', { name: '가나 세르카 클리어' })).not.toBeInTheDocument());
+    expect(screen.getByRole('combobox', { name: '다라 세르카 클리어' })).toBeInTheDocument();
   });
 
   it('저장된 비밀번호가 없으면 비밀번호 입력창을 먼저 보여 준다', async () => {

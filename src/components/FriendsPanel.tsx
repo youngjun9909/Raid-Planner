@@ -31,10 +31,12 @@ export function FriendsPanel({
   friends,
   onAdd,
   onRefresh,
+  onDelete,
 }: {
   friends: Friend[];
   onAdd: (displayName: string, representativeName: string) => Promise<string | null>;
   onRefresh: (id: string) => Promise<string | null>;
+  onDelete: (id: string) => Promise<string | null>;
 }) {
   const [displayName, setDisplayName] = useState('');
   const [repName, setRepName] = useState('');
@@ -42,6 +44,9 @@ export function FriendsPanel({
   const [addError, setAddError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<{ id: string; msg: string } | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<{ id: string; msg: string } | null>(null);
   const addSecs = useElapsed(adding);
   const refreshSecs = useElapsed(refreshing !== null);
 
@@ -67,6 +72,15 @@ export function FriendsPanel({
     if (err) setRefreshError({ id, msg: err });
   }
 
+  async function remove(id: string) {
+    setDeleting(id);
+    setDeleteError(null);
+    const err = await onDelete(id);
+    setDeleting(null);
+    if (err) setDeleteError({ id, msg: err });
+    else setConfirming(null);
+  }
+
   return (
     <div className="friends">
       {friends.length > 0 && (
@@ -84,16 +98,59 @@ export function FriendsPanel({
                     {refreshError.msg}
                   </span>
                 )}
+                {confirming === f.id && (
+                  <div className="friend__confirm" role="group" aria-label={`${f.displayName} 삭제 확인`}>
+                    <span>{f.displayName}의 원정대와 이번 주 클리어 기록을 지울까요? 되돌릴 수 없어요.</span>
+                    <span className="friend__confirm-actions">
+                      <button
+                        type="button"
+                        className="btn btn--small btn--danger"
+                        onClick={() => remove(f.id)}
+                        disabled={deleting !== null}
+                      >
+                        {deleting === f.id ? '지우는 중…' : '삭제하기'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--small btn--quiet"
+                        onClick={() => setConfirming(null)}
+                        disabled={deleting !== null}
+                        autoFocus
+                      >
+                        취소
+                      </button>
+                    </span>
+                    {deleteError?.id === f.id && (
+                      <span className="alert alert--error" role="alert">
+                        {deleteError.msg}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
-              <button
-                type="button"
-                className="btn btn--quiet"
-                onClick={() => refresh(f.id)}
-                disabled={refreshing !== null}
-                aria-label={`${f.displayName} 원정대 다시 불러오기`}
-              >
-                갱신
-              </button>
+              <span className="friend__actions">
+                <button
+                  type="button"
+                  className="btn btn--quiet"
+                  onClick={() => refresh(f.id)}
+                  disabled={refreshing !== null}
+                  aria-label={`${f.displayName} 원정대 다시 불러오기`}
+                >
+                  갱신
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--quiet"
+                  onClick={() => {
+                    setDeleteError(null);
+                    setConfirming(f.id);
+                  }}
+                  disabled={deleting !== null || confirming === f.id}
+                  aria-label={`${f.displayName} 삭제`}
+                >
+                  삭제
+                </button>
+              </span>
             </li>
           ))}
         </ul>

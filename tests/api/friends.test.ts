@@ -4,6 +4,8 @@ import { GET as getFriends, POST as postFriend } from '@/app/api/friends/route';
 import { POST as refresh } from '@/app/api/friends/[id]/refresh/route';
 import { PUT as putCp } from '@/app/api/friends/[id]/combat-power/route';
 import { PUT as putRole } from '@/app/api/friends/[id]/role/route';
+import { DELETE as deleteFriend } from '@/app/api/friends/[id]/route';
+import { weekKey } from '@/core/week';
 import { LostArkError } from '@/lostark/client';
 import { req, ch, friend } from './helpers';
 
@@ -29,6 +31,24 @@ describe('POST /api/friends', () => {
     expect(f.displayName).toBe('철수');
     expect(fetchRoster).toHaveBeenCalledWith('A1');
     expect(await (await getFriends(req('/api/friends'))).json()).toEqual([f]);
+  });
+  it('이미 있는 대표 캐릭터면 로스터를 부르지 않고 409', async () => {
+    await store.saveFriend(friend('a', [ch('A1'), ch('A2')]));
+    for (const rep of ['A1', ' A1 ', 'A2']) {
+      const res = await post({ displayName: '중복', representativeName: rep });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: '이미 등록된 캐릭터예요' });
+    }
+    expect(fetchRoster).not.toHaveBeenCalled();
+    expect(await store.listFriends()).toHaveLength(1);
+  });
+  it('불러온 원정대에 다른 친구의 캐릭터가 있으면 409 (저장하지 않음)', async () => {
+    await store.saveFriend(friend('a', [ch('A1'), ch('A2')]));
+    fetchRoster.mockResolvedValue([ch('Z1'), ch('A2')]);
+    const res = await post({ displayName: '부캐', representativeName: 'Z1' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: '이미 등록된 캐릭터예요' });
+    expect(await store.listFriends()).toHaveLength(1);
   });
   it('빈 입력은 400', async () => {
     expect((await post({ displayName: '', representativeName: 'A1' })).status).toBe(400);
@@ -72,6 +92,29 @@ describe('POST /api/friends/[id]/refresh', () => {
     await store.saveFriend(friend('a', [ch('A1')]));
     fetchRoster.mockRejectedValue(new LostArkError('rate_limited'));
     expect((await refresh(req('/x', 'POST'), params('a'))).status).toBe(429);
+  });
+});
+
+describe('DELETE /api/friends/[id]', () => {
+  const del = (id: string, password?: string | null) => deleteFriend(req(`/api/friends/${id}`, 'DELETE', undefined, password), params(id));
+  it('친구와 이번 주 그 친구 캐릭터의 클리어를 지운다', async () => {
+    const week = weekKey(new Date());
+    await store.saveFriend(friend('a', [ch('A1'), ch('A2')]));
+    await store.saveFriend(friend('b', [ch('B1')]));
+    await store.setManualCombatPower('a', 'A1', 1);
+    await store.setCharacterClears(week, 'A1', [{ raidName: '세르카', difficulty: '하드' }]);
+    await store.setCharacterClears(week, 'B1', [{ raidName: '세르카', difficulty: '하드' }]);
+    const res = await del('a');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect((await store.listFriends()).map((f) => f.id)).toEqual(['b']);
+    expect((await store.getClears(week)).map((c) => c.characterName)).toEqual(['B1']);
+  });
+  it('없는 친구는 404, 비밀번호 오류는 401', async () => {
+    expect((await del('zz')).status).toBe(404);
+    await store.saveFriend(friend('a', [ch('A1')]));
+    expect((await del('a', 'bad')).status).toBe(401);
+    expect(await store.listFriends()).toHaveLength(1);
   });
 });
 

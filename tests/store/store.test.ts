@@ -4,7 +4,7 @@ import { createMemoryStore, createUpstashStore, type Store } from '@/store/store
 import type { Friend } from '@/core/types';
 
 // Minimal in-test fake of the Redis methods the Upstash store uses:
-// get, set, del, sadd, smembers, hget, hset, hgetall, hdel
+// get, set, del, sadd, srem, smembers, hget, hset, hgetall, hdel
 // autoParse mimics the real client: JSON-parses string values (incl. numeric-looking set members) on read.
 function fakeRedis(autoParse = false): Redis {
   const out = (v: unknown): unknown => {
@@ -24,6 +24,12 @@ function fakeRedis(autoParse = false): Redis {
     },
     async sadd(k: string, ...ms: string[]) {
       const s = sets.get(k) ?? new Set<string>(); ms.forEach((m) => s.add(m)); sets.set(k, s); return ms.length;
+    },
+    async srem(k: string, ...ms: string[]) {
+      const s = sets.get(k); if (!s) return 0;
+      let n = 0; for (const m of ms) n += Number(s.delete(String(m)));
+      if (!s.size) sets.delete(k);
+      return n;
     },
     async smembers(k: string) { return [...(sets.get(k) ?? [])].map(out); },
     async hget(k: string, f: string) { return out(hashes.get(k)?.get(f) ?? null); },
@@ -146,6 +152,26 @@ describe.each([
     await s.setCharacterClears('w1', 'Alpha', [{ raidName: 'R1', difficulty: 'n' }]);
     expect(await s.getClears('w2')).toEqual([]);
     expect(await s.getClears('w1')).toHaveLength(1);
+  });
+
+  it('deleteFriend는 친구, 수동 값, 이번 주 그 친구 캐릭터의 클리어를 지우고 다른 친구/다른 주는 남긴다', async () => {
+    await s.saveFriend(friend());
+    await s.saveFriend(friend({ id: 'f2', representativeName: 'Gamma', characters: [{ name: 'Gamma', className: 'Bard', role: 'support', itemLevel: 1700, combatPower: 1 }] }));
+    await s.setManualCombatPower('f1', 'Alpha', 5000);
+    await s.setManualRole('f1', 'Alpha', 'support');
+    await s.setCharacterClears('w1', 'Alpha', [{ raidName: 'R1', difficulty: 'n' }]);
+    await s.setCharacterClears('w1', 'Beta', [{ raidName: 'R1', difficulty: 'n' }]);
+    await s.setCharacterClears('w1', 'Gamma', [{ raidName: 'R1', difficulty: 'n' }]);
+    await s.setCharacterClears('w0', 'Alpha', [{ raidName: 'R1', difficulty: 'n' }]);
+    expect(await s.deleteFriend('f1', 'w1')).toBe(true);
+    expect(await s.getFriend('f1')).toBeUndefined();
+    expect((await s.listFriends()).map((f) => f.id)).toEqual(['f2']);
+    expect(await s.getClears('w1')).toEqual([{ characterName: 'Gamma', raidName: 'R1', difficulty: 'n' }]);
+    expect(await s.getClears('w0')).toHaveLength(1);
+    // 같은 id로 다시 저장해도 예전 수동 값이 되살아나지 않는다
+    await s.saveFriend(friend());
+    expect(await s.getFriend('f1')).toEqual(friend());
+    expect(await s.deleteFriend('nope', 'w1')).toBe(false);
   });
 
   it('deleteWeek 후 getClears는 []', async () => {
