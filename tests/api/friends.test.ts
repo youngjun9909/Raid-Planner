@@ -258,6 +258,18 @@ describe('1700 미만 캐릭터는 응답에서 숨긴다 (설계 수정 B)', ()
     expect(list[0].characters.map((c: { name: string }) => c.name)).toEqual(['A1', 'Edge']);
     expect((await store.getFriend('a'))!.characters).toHaveLength(3);
   });
+  it('GET /api/friends의 숙련도·가는 난이도도 보이는 캐릭터 것만 (숨긴 캐릭터 값은 저장소에만 남는다)', async () => {
+    await store.setProficiency('a', 'A1', '세르카', '숙련');
+    await store.setProficiency('a', 'Low', '세르카', '클경');
+    await store.setTargetDifficulty('a', 'Edge', '세르카', '노말');
+    await store.setTargetDifficulty('a', 'Low', '세르카', '안 감');
+    const list = await (await getFriends(req('/api/friends'))).json();
+    expect(list[0].proficiency).toEqual({ 'A1|세르카': '숙련' });
+    expect(list[0].targetDifficulty).toEqual({ 'Edge|세르카': '노말' });
+    const stored = (await store.getFriend('a'))!;
+    expect(stored.proficiency).toEqual({ 'A1|세르카': '숙련', 'Low|세르카': '클경' });
+    expect(stored.targetDifficulty).toEqual({ 'Edge|세르카': '노말', 'Low|세르카': '안 감' });
+  });
   it('수동 전투력/역할/숙련도 응답에도 숨긴 캐릭터가 없고, 숨긴 캐릭터는 고칠 수 없다(400)', async () => {
     const cp = await putCp(req('/api/friends/a/combat-power', 'PUT', { characterName: 'A1', cp: 1 }), params('a'));
     expect((await cp.json()).characters.map((c: { name: string }) => c.name)).toEqual(['A1', 'Edge']);

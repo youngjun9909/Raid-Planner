@@ -9,5 +9,20 @@ import type { Character, Friend } from './types';
 export const visibleCharacters = (characters: Character[]): Character[] =>
   characters.filter((c) => c.itemLevel >= MIN_RAID_LEVEL);
 
-/** 응답용 친구: characters만 보이는 캐릭터로 거른다 (숙련도·가는 난이도 등 나머지는 그대로). */
-export const visibleFriend = <F extends Friend>(f: F): F => ({ ...f, characters: visibleCharacters(f.characters) });
+/** 키 `<캐릭터 이름>|<레이드 이름>`인 값 중 보이는 캐릭터의 것만 남긴다. */
+function onlyVisible<V>(m: Record<string, V>, names: Set<string>): Record<string, V> {
+  return Object.fromEntries(Object.entries(m).filter(([k]) => names.has(k.slice(0, k.lastIndexOf('|')))));
+}
+
+/**
+ * 응답용 친구: characters를 보이는 캐릭터로 거르고, 숙련도·가는 난이도(키 `<캐릭터 이름>|<레이드 이름>`)도 보이는 캐릭터의
+ * 것만 남긴다 (필드가 없으면 없는 그대로). 나머지 필드는 그대로, 원본은 바꾸지 않는다.
+ */
+export const visibleFriend = <F extends Friend>(f: F): F => {
+  const characters = visibleCharacters(f.characters);
+  const names = new Set(characters.map((c) => c.name));
+  const out: F = { ...f, characters };
+  if (f.proficiency) out.proficiency = onlyVisible(f.proficiency, names);
+  if (f.targetDifficulty) out.targetDifficulty = onlyVisible(f.targetDifficulty, names);
+  return out;
+};
