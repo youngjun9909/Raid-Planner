@@ -1,4 +1,5 @@
 import { RAIDS } from '@/core/raids';
+import { SKIP_DIFFICULTY, TARGET_RAID_NAMES, difficultiesOf } from '@/core/difficulty';
 import { PROFICIENCIES, RAID_NAMES_FOR_PROFICIENCY } from '@/core/proficiency';
 import type { RaidConfig } from '@/core/types';
 
@@ -26,6 +27,19 @@ export interface CommandDef {
 }
 
 export const raidTitle = (raid: RaidConfig): string => `${raid.name} ${raid.difficulty}`;
+
+/** /난이도의 "자동" 선택지 (저장된 값을 지우고 레벨로 정한다). */
+export const AUTO_DIFFICULTY = '자동';
+
+/** /난이도 난이도 선택지: 자동 + 모든 난이도 이름의 합집합(보기 좋은 순서) + 안 감. */
+const DIFFICULTY_ORDER = ['노말', '하드', '나이트메어', '1단계', '2단계', '3단계'];
+const allDifficultyNames = [...new Set(TARGET_RAID_NAMES.flatMap(difficultiesOf))]
+  .sort((a, b) => {
+    const ia = DIFFICULTY_ORDER.indexOf(a);
+    const ib = DIFFICULTY_ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+export const DIFFICULTY_CHOICES = [AUTO_DIFFICULTY, ...allDifficultyNames, SKIP_DIFFICULTY];
 
 export const COMMAND_GROUPS = ['시작하기', '공대 짜기', '클리어 관리'] as const;
 
@@ -76,6 +90,29 @@ export const COMMANDS: CommandDef[] = [
         description: '숙련(익숙함) · 반숙(보통, 기본값) · 클경(클리어 경험만)',
         required: true,
         choices: PROFICIENCIES.map((p) => ({ name: p, value: p })),
+      },
+    ],
+  },
+  {
+    name: '난이도',
+    description: '내 캐릭터가 레이드마다 어떤 난이도로 가는지 정해요 (자동은 레벨로 갈 수 있는 가장 높은 난이도)',
+    group: '공대 짜기',
+    example: '/난이도 캐릭터:홍길동 레이드:카제로스 4막 (아르모체) 난이도:노말',
+    options: [
+      { type: STRING, name: '캐릭터', description: '내 캐릭터 이름 (입력하면 내 캐릭터 목록이 떠요)', required: true, autocomplete: true },
+      {
+        type: STRING,
+        name: '레이드',
+        description: '레이드 이름 (난이도는 따로 골라요)',
+        required: true,
+        choices: TARGET_RAID_NAMES.map((n) => ({ name: n, value: n })),
+      },
+      {
+        type: STRING,
+        name: '난이도',
+        description: '자동(레벨로 가장 높은 난이도) · 가는 난이도 · 안 감(그 레이드는 안 가요)',
+        required: true,
+        choices: DIFFICULTY_CHOICES.map((n) => ({ name: n, value: n })),
       },
     ],
   },

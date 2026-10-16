@@ -20,6 +20,7 @@ export const ICON = {
   empty: '💤',
   web: '🌐',
   proficiency: '🎯',
+  target: '🧭',
   warn: '⚠️',
 } as const;
 

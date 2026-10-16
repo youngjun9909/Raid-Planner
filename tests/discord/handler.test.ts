@@ -44,8 +44,8 @@ const content = (r: { response: any }) => r.response.data?.content as string;
 const all = (r: { response: any }) => JSON.stringify(r.response.data);
 
 describe('COMMANDS', () => {
-  it('명령어, 등록, 공대, 클리어, 현황, 웹, 숙련도', () => {
-    expect(COMMANDS.map((c) => c.name).sort()).toEqual(['공대', '등록', '명령어', '클리어', '현황', '웹', '숙련도'].sort());
+  it('명령어, 등록, 공대, 클리어, 현황, 웹, 숙련도, 난이도', () => {
+    expect(COMMANDS.map((c) => c.name).sort()).toEqual(['공대', '등록', '명령어', '클리어', '현황', '웹', '숙련도', '난이도'].sort());
   });
   it('/숙련도: 캐릭터(자동완성), 레이드(레이드 이름 6개), 숙련도(숙련/반숙/클경) 옵션이 모두 필수', () => {
     const c = COMMANDS.find((x) => x.name === '숙련도')!;
@@ -274,8 +274,10 @@ describe('handleInteraction', () => {
       const rows = r.response.data!.components!;
       const raidSelect = rows.flatMap((row: any) => row.components).find((c: any) => c.custom_id === `clr:r:fa:${WEEK}:A1`);
       expect(raidSelect.min_values).toBe(0);
-      expect(raidSelect.max_values).toBe(14);
-      expect(raidSelect.options).toHaveLength(14);
+      // A1은 1735: 입장할 수 있는 레이드 이름 5개 (3막, 4막, 성당, 종막, 세르카)만, 이름마다 하나
+      expect(raidSelect.max_values).toBe(5);
+      expect(raidSelect.options).toHaveLength(5);
+      expect(raidSelect.options.map((o: any) => o.value)).toEqual(['mordum-hard', 'armoche-hard', 'cathedral-2', 'kazeros-hard', 'serka-hard']);
       expect(raidSelect.options.find((o: any) => o.value === 'serka-hard')).toMatchObject({ label: '세르카 하드', default: true });
       expect(raidSelect.options.filter((o: any) => o.default)).toHaveLength(1);
       for (const row of rows) for (const c of row.components) expect((c.custom_id ?? "").length).toBeLessThanOrEqual(100);
@@ -586,5 +588,161 @@ describe('1700 미만 캐릭터는 디스코드에서도 숨긴다 (설계 수�
     const set = await run(cmd('숙련도', [{ name: '캐릭터', value: 'A-low' }, { name: '레이드', value: '세르카' }, { name: '숙련도', value: '숙련' }]));
     expect(set.response.data!.flags).toBe(64);
     expect((await store.getFriend('fa'))!.proficiency).toBeUndefined();
+  });
+});
+
+describe('/클리어 레이드 메뉴: 가는 난이도 (설계 수정 A)', () => {
+  const sel = async (character: string, friend: Friend = friendA) => {
+    await store.saveFriend(friend);
+    const r = await run(comp(`clr:c:${friend.id}`, [character], friend.discordUserId));
+    return (r.response.data!.components as any[]).flatMap((row) => row.components).find((c: any) => c.custom_id?.startsWith('clr:r:')) as StringSelect;
+  };
+
+  it('입장할 수 없는 레이드는 없고(1700은 3개), 이름마다 하나, 값은 가는 난이도의 레이드 id', async () => {
+    const low: Friend = { ...friendA, characters: [ch('Lo', 'dealer', 3000, 1705)] };
+    const s = await sel('Lo', low);
+    expect(s.options.map((o) => o.value)).toEqual(['mordum-hard', 'armoche-normal', 'cathedral-1']);
+    expect(s.max_values).toBe(3);
+  });
+
+  it('직접 정한 가는 난이도가 라벨에 나온다 (4막 노말로 가는 1735)', async () => {
+    await store.saveFriend(friendA);
+    await store.setTargetDifficulty('fa', 'A1', '카제로스 4막 (아르모체)', '노말');
+    const s = await sel('A1');
+    const four = s.options.filter((o) => o.label.startsWith('카제로스 4막'));
+    expect(four).toEqual([{ label: '카제로스 4막 (아르모체) 노말', value: 'armoche-normal' }]);
+  });
+
+  it('안 감으로 정한 레이드도 메뉴에는 자동 난이도로 남는다 (이미 갔을 수 있어서)', async () => {
+    await store.saveFriend(friendA);
+    await store.setTargetDifficulty('fa', 'A1', '세르카', '안 감');
+    const s = await sel('A1');
+    expect(s.options.find((o) => o.value === 'serka-hard')).toBeDefined();
+  });
+
+  it('레벨보다 높게 정해 둔 난이도는 메뉴에서 자동 난이도로 보인다', async () => {
+    await store.saveFriend(friendA);
+    await store.setTargetDifficulty('fa', 'A1', '세르카', '나이트메어'); // 1735 < 1740
+    const s = await sel('A1');
+    expect(s.options.filter((o) => o.label.startsWith('세르카')).map((o) => o.value)).toEqual(['serka-hard']);
+  });
+
+  it('이미 다른 난이도로 클리어했다면 그 난이도가 보이고 기본 선택, 설명으로 가는 난이도를 알려 준다', async () => {
+    await store.saveFriend(friendA);
+    await store.setCharacterClears(WEEK, 'A1', [{ raidName: '세르카', difficulty: '노말' }]);
+    const s = await sel('A1');
+    const serka = s.options.filter((o) => o.label.startsWith('세르카'));
+    expect(serka).toEqual([{ label: '세르카 노말', value: 'serka-normal', description: '가는 난이도는 하드예요', default: true }]);
+  });
+
+  it('제출: 메뉴에 없는 레이드(레벨 부족)는 저장하지 않고, 레벨 모자라 안 보이는 기존 기록은 남는다', async () => {
+    const low: Friend = { ...friendA, characters: [ch('Lo', 'dealer', 3000, 1705)] };
+    await store.saveFriend(low);
+    await store.setCharacterClears(WEEK, 'Lo', [{ raidName: '벨가르딘', difficulty: '노말' }]);
+    const bad = await run(comp(`clr:r:fa:${WEEK}:Lo`, ['serka-hard']));
+    expect(content(bad)).toContain('갈 수 없는 레이드');
+    expect(await store.getClears(WEEK)).toEqual([{ characterName: 'Lo', raidName: '벨가르딘', difficulty: '노말' }]);
+    const ok = await run(comp(`clr:r:fa:${WEEK}:Lo`, ['cathedral-1']));
+    expect(content(ok)).toContain('Lo 클리어 1건 저장했어요');
+    expect(await store.getClears(WEEK)).toEqual(expect.arrayContaining([
+      { characterName: 'Lo', raidName: '벨가르딘', difficulty: '노말' }, { characterName: 'Lo', raidName: '지평의 성당', difficulty: '1단계' },
+    ]));
+  });
+});
+
+describe('/난이도', () => {
+  beforeEach(async () => { await store.saveFriend(friendA); await store.saveFriend(friendB); });
+  const diff = (character: unknown, raid: unknown, level: unknown, userId = 'u1') =>
+    cmd('난이도', [{ name: '캐릭터', value: character }, { name: '레이드', value: raid }, { name: '난이도', value: level }], userId);
+  const auto = (value: string, userId = 'u1', name = '난이도') => ({
+    type: 4, id: 'i3', application_id: 'app1', token: 'tok-secret', ...user(userId),
+    data: { name, options: [{ name: '캐릭터', type: 3, value, focused: true }] },
+  });
+
+  it('명령어 정의: 옵션 3개, 한국어 설명, 난이도 선택지는 자동 + 6개 이름 + 안 감 (25개 이내)', () => {
+    const c = COMMANDS.find((x) => x.name === '난이도')!;
+    expect(c.options!.map((o) => [o.name, o.type, o.required])).toEqual([['캐릭터', 3, true], ['레이드', 3, true], ['난이도', 3, true]]);
+    expect(c.options![0].autocomplete).toBe(true);
+    expect(c.options![1].choices!.map((x) => x.value)).toEqual([...new Set(RAIDS.map((r) => r.name))]);
+    expect(c.options![2].choices!.map((x) => x.value)).toEqual(['자동', '노말', '하드', '나이트메어', '1단계', '2단계', '3단계', '안 감']);
+    for (const o of c.options!) expect((o.choices ?? []).length).toBeLessThanOrEqual(25);
+    expect(c.description.length).toBeLessThanOrEqual(100);
+    const reg = registrationPayload().find((x) => x.name === '난이도')!;
+    expect(reg.options![0]).toMatchObject({ name: '캐릭터', autocomplete: true });
+    for (const o of reg.options!) expect(o.description).toMatch(/[가-힣]/);
+  });
+
+  it('난이도를 저장하고 본인에게만 확인 카드(캐릭터 · 레이드 → 난이도, 실제 난이도)를 준다', async () => {
+    const r = await run(diff('A1', '카제로스 4막 (아르모체)', '노말'));
+    expect(r.response.type).toBe(4);
+    expect(r.response.data!.flags).toBe(64);
+    expect(all(r)).toContain('A1 · 카제로스 4막 (아르모체) → 노말');
+    expect(all(r)).toContain('실제로 가는 난이도: 노말');
+    expect((await store.getFriend('fa'))!.targetDifficulty).toEqual({ 'A1|카제로스 4막 (아르모체)': '노말' });
+    // /공대: 4막 하드 후보에서는 빠지고 노말 후보가 된다
+    expect(all(await run(cmd('공대', [{ name: '레이드', value: 'armoche-hard' }])))).not.toMatch(/\*\*A1\*\*/);
+    expect(all(await run(cmd('공대', [{ name: '레이드', value: 'armoche-normal' }])))).toMatch(/\*\*A1\*\*/);
+  });
+
+  it('자동은 저장값을 지우고 "자동 → 하드"처럼 실제 난이도를 보여 준다', async () => {
+    await store.setTargetDifficulty('fa', 'A1', '카제로스 4막 (아르모체)', '노말');
+    const r = await run(diff('A1', '카제로스 4막 (아르모체)', '자동'));
+    expect(all(r)).toContain('자동 → 하드');
+    expect((await store.getFriend('fa'))!.targetDifficulty).toBeUndefined();
+  });
+
+  it('안 감은 저장되고 추천에서 빠진다는 안내', async () => {
+    const r = await run(diff('A1', '세르카', '안 감'));
+    expect(all(r)).toContain('공대 추천에서 빠져요');
+    expect((await store.getFriend('fa'))!.targetDifficulty).toEqual({ 'A1|세르카': '안 감' });
+  });
+
+  it('레벨보다 높은 난이도는 저장하되(오류 아님) 레벨이 되면 적용된다고 알려 준다', async () => {
+    const r = await run(diff('A1', '세르카', '나이트메어')); // A1 1735, 나이트메어 1740
+    expect(all(r)).not.toContain('⚠️');
+    expect(all(r)).toContain('입장 레벨(1740)');
+    expect(all(r)).toContain('레벨이 되면');
+    expect((await store.getFriend('fa'))!.targetDifficulty).toEqual({ 'A1|세르카': '나이트메어' });
+  });
+
+  it('그 레이드에 없는 난이도면 친절한 오류와 가능한 난이도 목록 (저장하지 않음)', async () => {
+    const r = await run(diff('A1', '세르카', '3단계'));
+    expect(r.response.data!.flags).toBe(64);
+    expect(all(r)).toContain('세르카에는 3단계 난이도가 없어요');
+    expect(all(r)).toContain('노말, 하드, 나이트메어');
+    expect((await store.getFriend('fa'))!.targetDifficulty).toBeUndefined();
+  });
+
+  it('없는 캐릭터, 다른 친구 캐릭터, 알 수 없는 레이드, 미등록 사용자', async () => {
+    expect(all(await run(diff('Nobody', '세르카', '하드')))).toContain('내 원정대에 없는 캐릭터');
+    const other = await run(diff('B1', '세르카', '하드'));
+    expect(all(other)).toContain('내 캐릭터만 바꿀 수 있어요');
+    expect(all(await run(diff('A1', '없는레이드', '하드')))).toContain('알 수 없는 레이드');
+    const stranger = await run(diff('A1', '세르카', '하드', 'stranger'));
+    expect(stranger.response.data!.flags).toBe(64);
+    expect(all(stranger)).toContain('/등록');
+    expect((await store.getFriend('fb'))!.targetDifficulty).toBeUndefined();
+  });
+
+  it('1700 미만 캐릭터는 바꿀 수 없다', async () => {
+    await store.saveFriend({ ...friendA, characters: [ch('A1'), ch('A-low', 'dealer', 3000, 1699)] });
+    const r = await run(diff('A-low', '세르카', '노말'));
+    expect(all(r)).toContain('내 원정대에 없는 캐릭터');
+    expect((await store.getFriend('fa'))!.targetDifficulty).toBeUndefined();
+  });
+
+  it('자동완성: 내 보이는 캐릭터만, 필터, 25개까지, 낯선 사용자는 빈 목록, type 8', async () => {
+    await store.saveFriend({ ...friendA, characters: [ch('A1'), ch('A-low', 'dealer', 3000, 1699), ch('A2-sup', 'support', 2500)] });
+    const r = await run(auto(''));
+    expect(r.response.type).toBe(8);
+    expect(r.response.data!.choices!.map((c) => c.value)).toEqual(['A1', 'A2-sup']);
+    expect((await run(auto('sup'))).response.data!.choices!.map((c) => c.value)).toEqual(['A2-sup']);
+    expect((await run(auto('', 'stranger'))).response).toEqual({ type: 8, data: { choices: [] } });
+    await store.saveFriend({ ...friendA, characters: Array.from({ length: 30 }, (_, i) => ch('C' + i, 'dealer', 3000, 1700 + i)) });
+    expect((await run(auto(''))).response.data!.choices).toHaveLength(25);
+  });
+
+  it('/명령어 도움말에 /난이도가 나온다', async () => {
+    expect(all(await run(cmd('명령어')))).toContain('/난이도');
   });
 });

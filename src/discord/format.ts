@@ -502,6 +502,25 @@ export function proficiencySaved(characterName: string, raidName: string, level:
   })]);
 }
 
+/**
+ * /난이도 저장 확인: "A1 · 세르카 → 하드" 한 줄, 실제로 가는 난이도, 필요하면 안내 한 줄.
+ * choice = 사용자가 고른 값(자동 / 난이도 / 안 감), effective = 실제로 가는 난이도 (없으면 null), note = 덧붙일 안내.
+ */
+export function targetDifficultySaved(characterName: string, raidName: string, choice: string, effective: string | null, note: string | undefined, now: Date): MessageParts {
+  const line = `${characterName} · ${raidName} → ${choice}`;
+  const result = choice === '안 감'
+    ? '이 레이드는 공대 추천에서 빠져요.'
+    : choice === '자동'
+      ? `실제로 가는 난이도: 자동 → ${effective ?? '아직 갈 수 없어요'}`
+      : `실제로 가는 난이도: ${choice}`;
+  return parts(`${ICON.target} ${line}`, [frame(now, `${ICON.target} 가는 난이도`, {
+    title: `${ICON.target} ${line}`,
+    color: COLOR.success,
+    description: [`**${characterName}** · ${raidName} → ${choice}`, result, ...(note ? [note] : []),
+      ...(choice === '안 감' ? [] : ['그 레이드의 다른 난이도 추천에서는 이 캐릭터가 빠져요.'])].join('\n'),
+  })]);
+}
+
 /** 빨간 오류 임베드: 친절한 한 줄 원인 + 해결 방법. content는 원인 그대로 둔다. */
 export function errorParts(cause: string, fix: string, now: Date): MessageParts {
   return parts(cause, [frame(now, `${ICON.error} 알림`, {

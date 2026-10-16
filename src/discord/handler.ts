@@ -5,15 +5,17 @@ import { getRaid, RAIDS } from '@/core/raids';
 import { planRaid } from '@/core/planner';
 import { isProficiency, proficiencyLookup, RAID_NAMES_FOR_PROFICIENCY } from '@/core/proficiency';
 import { weekKey } from '@/core/week';
-import { targetDifficultyLookup } from '@/core/difficulty';
+import {
+  SKIP_DIFFICULTY, TARGET_RAID_NAMES, autoDifficulty, difficultiesOf, effectiveDifficulty, targetDifficultyKey, targetDifficultyLookup,
+} from '@/core/difficulty';
 import { visibleFriend } from '@/core/visible';
 import type { Character, ClearRecord, Friend, RaidConfig } from '@/core/types';
 import { applyClearChange, formatLevel } from '@/lib/view-model';
 import { getWebUrl } from '@/lib/web-url';
 import { findOwner } from '@/lib/friend-dupes';
-import { COMMANDS, raidTitle } from './commands';
+import { AUTO_DIFFICULTY, COMMANDS, raidTitle } from './commands';
 import {
-  characterClearsEmbed, errorParts, formatHelp, formatPlan, formatStatus, proficiencySaved, registerSuccess,
+  characterClearsEmbed, errorParts, formatHelp, formatPlan, formatStatus, proficiencySaved, registerSuccess, targetDifficultySaved,
   NO_FRIENDS_TEXT, webLinkParts, type MessageParts,
 } from './format';
 import { ICON } from './theme';
@@ -55,6 +57,7 @@ const FIX = {
   profCharacter: '`/숙련도`에서 캐릭터 칸에 글자를 넣으면 뜨는 내 캐릭터 목록에서 골라 주세요.',
   profNotMine: '내 캐릭터의 숙련도만 바꿀 수 있어요. 캐릭터 칸의 목록에서 골라 주세요.',
   profRaid: '`/숙련도`의 레이드 목록에서 골라 주세요.',
+  diffRaid: '`/난이도`의 레이드 목록에서 골라 주세요.',
   profLevel: '`/숙련도`의 숙련도 목록(숙련 · 반숙 · 클경)에서 골라 주세요.',
 };
 const LOSTARK_FIX: Record<LostArkErrorCode, string> = {
@@ -123,6 +126,7 @@ async function onCommand(body: DiscordInteraction, deps: Deps, fail: Fail): Prom
     }
     case '클리어': return onClearStart(body, deps, fail);
     case '숙련도': return onProficiency(body, deps, fail);
+    case '난이도': return onTargetDifficulty(body, deps, fail);
     case '웹': return only(privately(webLinkParts(getWebUrl(), deps.now())));
     case '현황': return only(await onStatus(deps));
     default: return fail(UNKNOWN_TEXT, FIX.unknown);
@@ -223,7 +227,7 @@ const NO_CHOICES: DiscordResponse = { type: ResponseType.APPLICATION_COMMAND_AUT
 
 async function onAutocomplete(body: DiscordInteraction, deps: Deps): Promise<DiscordResponse> {
   const focused = body.data?.options?.find((o) => o.focused);
-  if (body.data?.name !== '숙련도' || focused?.name !== '캐릭터') return NO_CHOICES;
+  if ((body.data?.name !== '숙련도' && body.data?.name !== '난이도') || focused?.name !== '캐릭터') return NO_CHOICES;
   const me = await findMe(body, deps.store);
   if (!me) return NO_CHOICES;
   const typed = String(focused.value ?? '').trim().toLowerCase();
@@ -253,6 +257,39 @@ async function onProficiency(body: DiscordInteraction, deps: Deps, fail: Fail): 
   if (!isProficiency(level)) return fail('숙련도는 숙련, 반숙, 클경 중에서 골라 주세요', FIX.profLevel);
   await deps.store.setProficiency(me.id, character.name, raidName, level);
   return only(privately(proficiencySaved(character.name, raidName, level, deps.now())));
+}
+
+// ---------- /난이도 ----------
+//
+// /숙련도와 같은 규칙: 실행한 사람의 보이는(1700 이상) 캐릭터만. 가는 난이도는 그 레이드 이름의 난이도 중 하나, 자동(저장값 지움), 안 감.
+
+async function onTargetDifficulty(body: DiscordInteraction, deps: Deps, fail: Fail): Promise<HandlerResult> {
+  const me = await findMe(body, deps.store);
+  if (!me) return fail('먼저 `/등록`으로 대표 캐릭터를 등록해 주세요', FIX.registerFirst);
+  const name = String(option(body, '캐릭터') ?? '').trim();
+  const raidName = String(option(body, '레이드') ?? '');
+  const choice = String(option(body, '난이도') ?? '');
+  if (!name) return fail('캐릭터 이름을 골라 주세요', FIX.profCharacter);
+  const character = me.characters.find((c) => c.name === name);
+  if (!character) {
+    const owner = findOwner(await deps.store.listFriends(), [name], me.id);
+    return owner
+      ? fail('내 캐릭터만 바꿀 수 있어요', FIX.profNotMine)
+      : fail(`내 원정대에 없는 캐릭터예요: ${clip(name, 40)}`, FIX.profCharacter);
+  }
+  if (!TARGET_RAID_NAMES.includes(raidName)) return fail('알 수 없는 레이드예요', FIX.diffRaid);
+  const valid = difficultiesOf(raidName);
+  if (choice !== AUTO_DIFFICULTY && choice !== SKIP_DIFFICULTY && !valid.includes(choice)) {
+    return fail(`${raidName}에는 ${choice} 난이도가 없어요`, `${raidName}의 난이도는 ${valid.join(', ')}이에요. 그중에서 고르거나 자동, 안 감을 골라 주세요.`);
+  }
+  const override = choice === AUTO_DIFFICULTY ? undefined : choice;
+  await deps.store.setTargetDifficulty(me.id, character.name, raidName, override ?? null);
+  const effective = effectiveDifficulty(character.itemLevel, raidName, override);
+  const raid = RAIDS.find((r) => r.name === raidName && r.difficulty === effective);
+  const note = raid && character.itemLevel < raid.minLevel
+    ? `이 캐릭터는 아직 ${raidName} ${effective} 입장 레벨(${raid.minLevel})이 안 돼서, 레벨이 되면 그때부터 적용돼요.`
+    : undefined;
+  return only(privately(targetDifficultySaved(character.name, raidName, choice, effective, note, deps.now())));
 }
 
 // ---------- /클리어 ----------
@@ -296,17 +333,43 @@ function characterRow(friend: Friend, week: string, selected?: string): ActionRo
   return { type: 1, components: [{ type: 3, custom_id: `clr:c:${friend.id}`, placeholder: '캐릭터를 골라 주세요', options }] };
 }
 
-function raidRow(friend: Friend, week: string, name: string, clears: ClearRecord[]): ActionRow {
-  const done = (r: RaidConfig) => clears.some((c) => c.characterName === name && c.raidName === r.name && c.difficulty === r.difficulty);
+/**
+ * /클리어 레이드 메뉴의 선택지: 캐릭터가 입장할 수 있는 레이드 이름마다 하나. 이미 클리어한 난이도가 있으면 그 난이도,
+ * 없으면 가는 난이도(레벨보다 높게 정해 둔 값이면 자동 기본값). 값은 그 난이도의 레이드 id라 모호하지 않다.
+ */
+function raidChoices(friend: Friend, character: Character, clears: ClearRecord[]): { raid: RaidConfig; target: string }[] {
+  const out: { raid: RaidConfig; target: string }[] = [];
+  for (const raidName of TARGET_RAID_NAMES) {
+    const auto = autoDifficulty(character.itemLevel, raidName);
+    if (auto === null) continue; // 레벨이 모자라 갈 수 없는 레이드
+    const override = friend.targetDifficulty?.[targetDifficultyKey(character.name, raidName)];
+    let target = effectiveDifficulty(character.itemLevel, raidName, override) ?? auto; // 안 감이어도 이미 갔다면 표시할 수 있게 메뉴에는 둔다
+    if ((RAIDS.find((r) => r.name === raidName && r.difficulty === target)?.minLevel ?? Infinity) > character.itemLevel) target = auto;
+    const cleared = clears.find((c) => c.characterName === character.name && c.raidName === raidName);
+    const shown = cleared?.difficulty ?? target;
+    const raid = RAIDS.find((r) => r.name === raidName && r.difficulty === shown);
+    if (raid) out.push({ raid, target });
+  }
+  return out;
+}
+
+function raidRow(friend: Friend, week: string, character: Character, clears: ClearRecord[]): ActionRow {
+  const done = (r: RaidConfig) => clears.some((c) => c.characterName === character.name && c.raidName === r.name && c.difficulty === r.difficulty);
+  const choices = raidChoices(friend, character, clears);
   return {
     type: 1,
     components: [{
       type: 3,
-      custom_id: raidSelectId(friend.id, week, characterRef(friend.id, week, name)),
+      custom_id: raidSelectId(friend.id, week, characterRef(friend.id, week, character.name)),
       placeholder: '이번 주에 클리어한 레이드를 모두 골라 주세요',
       min_values: 0,
-      max_values: RAIDS.length,
-      options: RAIDS.map((r) => ({ label: raidTitle(r), value: r.id, ...(done(r) ? { default: true } : {}) })),
+      max_values: Math.max(1, choices.length),
+      options: choices.map(({ raid, target }) => ({
+        label: raidTitle(raid),
+        value: raid.id,
+        ...(raid.difficulty !== target ? { description: `가는 난이도는 ${target}예요` } : {}),
+        ...(done(raid) ? { default: true } : {}),
+      })),
     }],
   };
 }
@@ -318,9 +381,6 @@ async function onClearStart(body: DiscordInteraction, deps: Deps, fail: Fail): P
   const week = weekKey(deps.now());
   return only(privately({ content: `${ICON.clear} 클리어를 표시할 캐릭터를 골라 주세요`, embeds: [], components: [characterRow(me, week)] }));
 }
-
-const inMenu = (r: { raidName: string; difficulty: string }) =>
-  RAIDS.some((x) => x.name === r.raidName && x.difficulty === r.difficulty);
 
 async function onComponent(body: DiscordInteraction, deps: Deps, fail: Fail): Promise<HandlerResult> {
   const [prefix, kind, friendId, ...rest] = (body.data?.custom_id ?? '').split(':');
@@ -346,7 +406,7 @@ async function onComponent(body: DiscordInteraction, deps: Deps, fail: Fail): Pr
   const view = (content: string, cs: ClearRecord[]): MessageParts => ({
     content,
     embeds: [characterClearsEmbed(character, cs, deps.now())],
-    components: [characterRow(me, week, character.name), raidRow(me, week, character.name, cs)],
+    components: [characterRow(me, week, character.name), raidRow(me, week, character, cs)],
   });
 
   if (kind === 'c') {
@@ -359,11 +419,16 @@ async function onComponent(body: DiscordInteraction, deps: Deps, fail: Fail): Pr
   if (new Set(chosen.map((r) => r.name)).size !== chosen.length) {
     return only(update(view(`${ICON.error} ${DUPLICATE_RAID_TEXT}. 다시 골라 주세요.`, clears)));
   }
-  // 의도된 동작: 레이드 메뉴는 RAIDS 전체(14개)를 담으므로 제출한 선택이 그 캐릭터의 "메뉴에 있는 레이드" 전체 기록을 대신한다
-  // (메뉴를 연 뒤 웹에서 같은 레이드를 바꿨다면 제출한 선택이 이긴다). 메뉴에 없는 기록(설정에서 빠진 레이드 등)은
+  // 메뉴에는 그 캐릭터가 입장할 수 있는 레이드(이름)만 있다. 메뉴에 없는 레이드는 고를 수 없다.
+  const offered = new Set(raidChoices(me, character, clears).map(({ raid }) => raid.name));
+  if (chosen.some((r) => !offered.has(r.name))) {
+    return only(update(view(`${ICON.error} 이 캐릭터가 갈 수 없는 레이드가 섞여 있어요. 다시 골라 주세요.`, clears)));
+  }
+  // 의도된 동작: 제출한 선택이 그 캐릭터의 "메뉴에 있는 레이드" 전체 기록을 대신한다
+  // (메뉴를 연 뒤 웹에서 같은 레이드를 바꿨다면 제출한 선택이 이긴다). 메뉴에 없는 기록(레벨이 모자란 레이드, 설정에서 빠진 레이드 등)은
   // 메뉴의 기본값이 아니라 지금 저장된 값에서 가져와 그대로 남긴다.
   const kept = clears
-    .filter((c) => c.characterName === character.name && !inMenu(c))
+    .filter((c) => c.characterName === character.name && !offered.has(c.raidName))
     .map(({ raidName, difficulty }) => ({ raidName, difficulty }));
   const records = [...chosen.map((r) => ({ raidName: r.name, difficulty: r.difficulty })), ...kept];
   await deps.store.setCharacterClears(week, character.name, records);

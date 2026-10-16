@@ -57,6 +57,17 @@ describe('POST /api/discord', () => {
     expect(await res.json()).toEqual({ type: 8, data: { choices: [] } });
   });
 
+  it('/난이도 자동완성도 서명을 검사하고 type 8로 응답한다', async () => {
+    const body = {
+      type: 4, token: 't', application_id: 'app', member: { user: { id: 'u' } },
+      data: { name: '난이도', options: [{ name: '캐릭터', type: 3, value: '', focused: true }] },
+    };
+    expect((await POST(signed(body, { badSig: true }))).status).toBe(401);
+    const res = await POST(signed(body));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ type: 8, data: { choices: [] } });
+  });
+
   it('/등록은 type 5로 응답하고 후속 작업을 after()로 예약한다', async () => {
     const { after } = await import('next/server');
     const res = await POST(signed({
