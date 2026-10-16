@@ -10,7 +10,7 @@
  * 동작 요약:
  *  - 같은 서버 캐릭터만 남겨요 (대표 캐릭터의 ServerName 기준; ServerName이 없으면 거르지 않아요).
  *  - 분당 100회 제한 때문에 프로필 조회는 순서대로 간격(기본 700ms)을 두고, 429면 중단해요.
- *    가장 낮은 레이드 입장 레벨보다 낮은 캐릭터는 프로필을 조회하지 않아요 (combatPower null).
+ *    가장 낮은 레이드 입장 레벨(지금 1700)보다 낮은 캐릭터는 원정대 목록에서 아예 빼요 (프로필도 조회하지 않아요).
  *  - 역할은 직업 이름으로 판별해요: SUPPORT_CLASSES(홀리나이트, 도화가, 바드, 발키리)는 사용자가 확정했어요 (2026-10-16).
  *    예외는 수동 역할 지정으로 바꿔요 (PUT /api/friends/[id]/role).
  */
@@ -117,19 +117,19 @@ export async function fetchRoster(representativeName: string, opts: FetchRosterO
     if (!name) continue;
     const className = String(s?.CharacterClassName ?? '');
     const itemLevel = parseItemLevel(s?.ItemAvgLevel);
+    // 어떤 레이드에도 못 들어가는 캐릭터(가장 낮은 레이드 입장 레벨 미만)는 원정대 목록에서 아예 뺀다.
+    // 전투력 조회도 필요 없어서 주간 크론의 시간/요청 수도 줄어든다.
+    if (itemLevel < MIN_RAID_LEVEL) continue;
     let combatPower: number | null = null;
     let engravings: string[] = [];
-    // 어떤 레이드에도 못 들어가는 캐릭터는 전투력이 필요 없으니 프로필을 부르지 않는다 (주간 크론 시간/요청 수 절약).
-    if (itemLevel >= MIN_RAID_LEVEL) {
-      if (profileCalls++ > 0) await sleep(delayMs);
-      try {
-        const profile: any = await get(`${BASE_URL}/armories/characters/${encodeURIComponent(name)}/profiles`, token, f);
-        combatPower = parseCombatPower(profile?.CombatPower);
-        engravings = collectEngravings(profile);
-      } catch (e) {
-        // Per-character not_found/unknown are tolerated; auth and rate limit abort.
-        if (e instanceof LostArkError && (e.code === 'rate_limited' || e.code === 'unauthorized')) throw e;
-      }
+    if (profileCalls++ > 0) await sleep(delayMs);
+    try {
+      const profile: any = await get(`${BASE_URL}/armories/characters/${encodeURIComponent(name)}/profiles`, token, f);
+      combatPower = parseCombatPower(profile?.CombatPower);
+      engravings = collectEngravings(profile);
+    } catch (e) {
+      // Per-character not_found/unknown are tolerated; auth and rate limit abort.
+      if (e instanceof LostArkError && (e.code === 'rate_limited' || e.code === 'unauthorized')) throw e;
     }
     roster.push({ name, className, role: detectRole(className, engravings), itemLevel, combatPower });
   }
