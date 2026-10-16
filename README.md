@@ -38,7 +38,7 @@
 데이터(친구, 클리어 기록)를 저장할 곳이에요. Vercel 서버는 요청마다 꺼졌다 켜져서 파일에 저장할 수 없어요.
 
 1. <https://upstash.com> 에 가입하고 Redis 데이터베이스를 새로 만들어요.
-2. 리전(지역)은 Vercel 함수 리전과 가까운 곳이 좋아요. 잘 모르겠으면 가까운 아시아나 미국 동부 중 하나를 고르세요.
+2. 리전(지역)은 Vercel 함수가 도는 리전과 같은 곳을 고르세요. Vercel 함수의 기본 리전은 미국 동부(`iad1`, 워싱턴 D.C.)라서 따로 바꾸지 않았다면 Upstash도 **US East (N. Virginia, us-east-1)** 를 고르는 것이 가장 빨라요. Vercel의 **Settings → Functions → Function Region**을 바꿨다면 그와 가까운 리전을 고르세요.
 3. 만든 데이터베이스 화면의 **REST API** 부분에서 두 값을 복사해요.
    - REST URL → `UPSTASH_REDIS_REST_URL`
    - REST TOKEN → `UPSTASH_REDIS_REST_TOKEN`

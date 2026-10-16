@@ -103,6 +103,27 @@ describe('fetchRoster', () => {
       ['창고', 'dealer', null],
     ]);
   });
+  it('원정대를 대표 캐릭터의 서버(ServerName)로 거른다', async () => {
+    const rows = [
+      { ServerName: '루페온', CharacterName: '대표', CharacterClassName: '버서커', ItemAvgLevel: '1,720.00' },
+      { ServerName: '카제로스', CharacterName: '딴서버', CharacterClassName: '바드', ItemAvgLevel: '1,730.00' },
+      { ServerName: '루페온', CharacterName: '같은서버', CharacterClassName: '바드', ItemAvgLevel: '1,710.00' },
+    ];
+    const { fetchImpl, calls } = router({ '/siblings': json(rows) });
+    const r = await fetchRoster('대표', { ...base, fetchImpl });
+    expect(r.map((c) => c.name)).toEqual(['대표', '같은서버']);
+    expect(calls.some((c) => c.url.includes(encodeURIComponent('딴서버')))).toBe(false);
+  });
+  it('대표 캐릭터가 목록에 없거나 ServerName이 없으면 거르지 않는다', async () => {
+    const noServer = [
+      { CharacterName: '대표', CharacterClassName: '버서커', ItemAvgLevel: '1,720.00' },
+      { CharacterName: '둘', CharacterClassName: '바드', ItemAvgLevel: '1,710.00' },
+    ];
+    const a = router({ '/siblings': json(noServer) });
+    expect((await fetchRoster('대표', { ...base, fetchImpl: a.fetchImpl })).map((c) => c.name)).toEqual(['대표', '둘']);
+    const b = router();
+    expect(await fetchRoster('목록에없음', { ...base, fetchImpl: b.fetchImpl })).toHaveLength(3);
+  });
   it('개별 프로필 실패(500)는 combatPower null로 허용', async () => {
     const { fetchImpl } = router({ '/profiles': json({}, 500) });
     const r = await fetchRoster('x', { ...base, fetchImpl });

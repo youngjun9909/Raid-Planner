@@ -120,7 +120,8 @@ function onRegister(body: DiscordInteraction, deps: Deps, fail: Fail): HandlerRe
   if (!user) return fail(GENERIC_ERROR_TEXT, FIX.generic);
   const displayName = body.member?.nick || user.global_name || user.username || name;
   return {
-    response: { type: ResponseType.DEFERRED_CHANNEL_MESSAGE },
+    // 결과(특히 "다른 계정에 연결됨" 같은 거절)는 실행한 사람에게만 보이게 한다. 후속 PATCH도 이 플래그를 따른다.
+    response: { type: ResponseType.DEFERRED_CHANNEL_MESSAGE, data: { flags: EPHEMERAL } },
     after: async () => {
       let message: MessageParts;
       try {

@@ -55,7 +55,8 @@ export interface Embed {
 }
 
 export interface MessageData {
-  content: string;
+  /** 지연 응답(type 5)은 flags만 보내므로 content가 없을 수 있다. */
+  content?: string;
   flags?: number;
   embeds?: Embed[];
   components?: ActionRow[];

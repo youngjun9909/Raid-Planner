@@ -6,7 +6,9 @@
  *  1. Base URL https://developer-lostark.game.onstove.com, header `authorization: bearer <JWT>`.
  *  2. GET /characters/{name}/siblings returns a JSON array of
  *     { ServerName, CharacterName, CharacterClassName, ItemAvgLevel: "1,620.00", ... };
- *     unknown name -> 404, or null/[] body.
+ *     unknown name -> 404, or null/[] body. The list spans every server of the account; we keep
+ *     only the representative's ServerName (UNVERIFIED: skipped when ServerName is absent or the
+ *     representative is not in the list).
  *  3. GET /armories/characters/{name}/profiles returns an object with
  *     CombatPower as a string ("3,150.25") or null; may be absent -> combatPower null.
  *  4. Engraving names (for detectRole) may live under ArkPassive.Effects[].Name/Description;
@@ -96,6 +98,13 @@ async function get(url: string, token: string, f: typeof fetch): Promise<unknown
   }
 }
 
+/** 레이드는 서버별이라 대표 캐릭터와 같은 서버의 캐릭터만 남긴다. ServerName을 알 수 없으면 그대로 둔다. */
+function sameServer(siblings: any[], representativeName: string): any[] {
+  const rep = siblings.find((s) => s?.CharacterName === representativeName);
+  const server = typeof rep?.ServerName === 'string' && rep.ServerName ? rep.ServerName : undefined;
+  return server ? siblings.filter((s) => s?.ServerName === server) : siblings;
+}
+
 export async function fetchRoster(representativeName: string, opts: FetchRosterOptions = {}): Promise<Character[]> {
   const token = opts.token ?? process.env.LOSTARK_JWT;
   if (!token) throw new LostArkError('unauthorized');
@@ -108,7 +117,7 @@ export async function fetchRoster(representativeName: string, opts: FetchRosterO
 
   const roster: Character[] = [];
   let profileCalls = 0;
-  for (const s of siblings as any[]) {
+  for (const s of sameServer(siblings as any[], representativeName)) {
     const name = String(s?.CharacterName ?? '');
     if (!name) continue;
     const className = String(s?.CharacterClassName ?? '');

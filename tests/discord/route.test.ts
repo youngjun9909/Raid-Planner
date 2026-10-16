@@ -52,7 +52,7 @@ describe('POST /api/discord', () => {
       type: 2, token: 't', application_id: 'app', member: { user: { id: 'u' } },
       data: { name: '등록', options: [{ name: '대표캐릭터', type: 3, value: 'X' }] },
     }));
-    expect(await res.json()).toEqual({ type: 5 });
+    expect(await res.json()).toEqual({ type: 5, data: { flags: 64 } });
     expect(after).toHaveBeenCalledWith(expect.any(Function));
   });
 });

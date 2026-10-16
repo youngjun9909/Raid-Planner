@@ -85,10 +85,10 @@ describe('handleInteraction', () => {
   });
 
   describe('/등록', () => {
-    it('/등록은 type 5로 먼저 응답한다', async () => {
+    it('/등록은 본인에게만 보이는 type 5로 먼저 응답한다 (거절 안내가 공개되지 않게)', async () => {
       fetchRoster.mockResolvedValue([ch('X1')]);
       const r = await run(cmd('등록', [{ name: '대표캐릭터', value: 'X1' }]));
-      expect(r.response).toEqual({ type: 5 });
+      expect(r.response).toEqual({ type: 5, data: { flags: 64 } });
       expect(fetchRoster).not.toHaveBeenCalled();
       expect(r.after).toBeTypeOf('function');
     });
