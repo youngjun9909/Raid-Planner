@@ -33,13 +33,13 @@ function MemberRow({ s, names, tracked }: { s: Slot; names: Map<string, string>;
   );
 }
 
-function PartyBlock({ party, index, rank, names, size, tracked }: {
-  party: Party; index: number; rank: number; names: Map<string, string>; size: number; tracked: boolean;
+function PartyBlock({ party, index, name, names, size, tracked }: {
+  party: Party; index: number; name: string; names: Map<string, string>; size: number; tracked: boolean;
 }) {
   const blocks = arrangeParty(party, size);
-  const label = `추천 ${rank + 1} ${index + 1}공대`;
+  const label = `${name} ${index + 1}공대`;
   return (
-    <section className={`party party--${party.tier}`} aria-label={`추천 ${rank + 1} ${index + 1}공대`}>
+    <section className={`party party--${party.tier}`} aria-label={label}>
       <header className="party__head">
         <span className="party__name">{index + 1}공대</span>
         <span className="party__avg">
@@ -67,6 +67,25 @@ function PartyBlock({ party, index, rank, names, size, tracked }: {
   );
 }
 
+/** "모두 편성" 대안의 비교 한 줄. 숫자가 없거나 0인 부분은 뺀다. 외부 인원은 굵게 + 경고 아이콘/글자 (색만으로 구분하지 않는다). */
+function FullPlacementNote({ summary }: { summary: Candidate['summary'] }) {
+  const ext = summary.extraExternalVsBest ?? 0;
+  const placed = summary.extraPlacedVsBest ?? 0;
+  if (ext <= 0 && placed <= 0) return null;
+  return (
+    <p className="candidate__note">
+      <span className="candidate__note-lead">추천보다 </span>
+      {ext > 0 && (
+        <span className="candidate__note-ext">
+          <span aria-hidden="true">⚠ </span>외부 {ext}명 더 필요해요
+        </span>
+      )}
+      {ext > 0 && placed > 0 && <span> · </span>}
+      {placed > 0 && <span className="candidate__note-placed">캐릭터 {placed}개 더 편성</span>}
+    </p>
+  );
+}
+
 /**
  * 추천 하나 = 완성된 편성. 요약 한 줄 아래에 1공대, 2공대, …를 반응형 그리드(넓으면 2~3열, 좁으면 1열)로 놓고,
  * 그 아래에 이번 추천에서 편성되지 못한 후보 캐릭터(unplaced)를 보여 준다.
@@ -74,12 +93,16 @@ function PartyBlock({ party, index, rank, names, size, tracked }: {
 export function CandidateCard({
   candidate,
   rank,
+  number,
   friends,
   raidId,
   proficiencyTracked = false,
 }: {
   candidate: Candidate;
+  /** 목록에서의 위치 (0부터; id를 겹치지 않게 하는 데만 쓴다). */
   rank: number;
+  /** 추천 번호 (추천만 센다). 없으면 rank + 1. "모두 편성" 대안에는 쓰지 않는다. */
+  number?: number;
   friends: Friend[];
   raidId: string;
   /** 이 편성에서 숙련도를 직접 정한 캐릭터가 있는가 (PlanResult.proficiencyTracked). 없으면 경고/기본 배지를 숨긴다. */
@@ -87,10 +110,13 @@ export function CandidateCard({
 }) {
   const names = new Map(friends.map((f) => [f.id, f.displayName]));
   const titleId = `cand-${raidId}-${rank}`; // 레이드마다 섹션이 따로 있어 레이드 id를 넣어야 겹치지 않는다
-  const best = rank === 0;
+  const full = candidate.kind === 'fullPlacement';
+  const num = number ?? rank + 1;
+  const best = !full && num === 1;
+  const name = full ? '모두 편성' : `추천 ${num}`;
   const size = getRaid(raidId)?.size ?? (candidate.parties[0]?.slots.length === 8 ? 8 : 4);
   return (
-    <article className={`candidate${best ? ' candidate--best' : ''}`} aria-labelledby={titleId}>
+    <article className={`candidate${best ? ' candidate--best' : ''}${full ? ' candidate--full' : ''}`} aria-labelledby={titleId}>
       <header className="candidate__head">
         <h4 id={titleId} className="candidate__title">
           {best && (
@@ -98,19 +124,20 @@ export function CandidateCard({
               ⭐
             </span>
           )}
-          추천 {rank + 1}
+          {name}
         </h4>
         {best && <span className="candidate__pick">가장 좋은 편성</span>}
+        {full && <FullPlacementNote summary={candidate.summary} />}
         <p className={`candidate__summary${candidate.summary.externalCount ? '' : ' candidate__summary--none'}`}>
           {planSummaryText(candidate.summary)}
         </p>
       </header>
-      <div className="candidate__parties" role="group" aria-label={`추천 ${rank + 1} 공대 목록`}>
+      <div className="candidate__parties" role="group" aria-label={`${name} 공대 목록`}>
         {candidate.parties.map((p, i) => (
-          <PartyBlock key={i} party={p} index={i} rank={rank} names={names} size={size} tracked={proficiencyTracked} />
+          <PartyBlock key={i} party={p} index={i} name={name} names={names} size={size} tracked={proficiencyTracked} />
         ))}
       </div>
-      <UnplacedList unplaced={candidate.unplaced ?? []} names={names} rank={rank} />
+      <UnplacedList unplaced={candidate.unplaced ?? []} names={names} label={name} />
       {candidate.parties.length > 1 && candidate.imbalance > 0 && (
         <footer className="candidate__foot muted">공대 간 딜러 평균 차이 {formatCP(candidate.imbalance)}</footer>
       )}

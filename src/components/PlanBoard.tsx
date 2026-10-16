@@ -65,6 +65,7 @@ function RaidPlan({ raidId, state, friends }: { raidId: string; state: PlanState
               key={i}
               candidate={c}
               rank={i}
+              number={data.candidates.slice(0, i + 1).filter((x) => x.kind !== 'fullPlacement').length}
               friends={friends}
               raidId={raid.id}
               proficiencyTracked={data.proficiencyTracked ?? false}

@@ -1673,3 +1673,34 @@ select {
 .prof-warn__icon {
   line-height: 1;
 }
+
+/* "모두 편성" 대안 카드: 추천과 구분되는 점선 테두리 + 비교 한 줄 */
+.candidate--full {
+  border-style: dashed;
+  border-color: var(--warn);
+}
+
+.candidate--full .candidate__title {
+  color: var(--text);
+}
+
+.candidate__note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.candidate__note-ext {
+  display: inline-block;
+  padding: 1px var(--s2);
+  border-radius: var(--radius);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-weight: 800;
+}
+
+.candidate__note-placed {
+  white-space: nowrap;
+}

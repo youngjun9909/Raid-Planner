@@ -21,7 +21,7 @@ function groupByFriend(list: UnplacedCharacter[]): { friendId: string; names: st
  * 추천 하나에서 편성되지 못한 후보 캐릭터 ("이번에 못 간 캐릭터"). 없으면 아무 것도 그리지 않는다.
  * 길면 처음 UNPLACED_PREVIEW개만 보이고 "외 N개 더 보기" 버튼으로 펼친다.
  */
-export function UnplacedList({ unplaced, names, rank }: { unplaced: UnplacedCharacter[]; names: Map<string, string>; rank: number }) {
+export function UnplacedList({ unplaced, names, label }: { unplaced: UnplacedCharacter[]; names: Map<string, string>; label: string }) {
   const [expanded, setExpanded] = useState(false);
   const titleId = useId();
   const listId = useId();
@@ -29,7 +29,7 @@ export function UnplacedList({ unplaced, names, rank }: { unplaced: UnplacedChar
   const hidden = Math.max(0, unplaced.length - UNPLACED_PREVIEW);
   const shown = expanded ? unplaced : unplaced.slice(0, UNPLACED_PREVIEW);
   return (
-    <div className="unplaced" role="group" aria-label={`추천 ${rank + 1} 이번에 못 간 캐릭터`}>
+    <div className="unplaced" role="group" aria-label={`${label} 이번에 못 간 캐릭터`}>
       <p className="unplaced__title" id={titleId}>
         <span className="unplaced__label">이번에 못 간 캐릭터</span>{' '}
         <span className="muted unplaced__why">(외부인이 많이 필요해서 이번 추천에서 뺐어요)</span>
