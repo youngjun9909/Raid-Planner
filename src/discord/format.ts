@@ -370,6 +370,15 @@ export function formatHelp(commands: CommandDef[], now: Date): MessageParts {
   })]);
 }
 
+/** `/웹` 응답: 웹 화면으로 가는 링크 버튼 하나. 비밀번호는 담지 않는다. */
+export function webLinkParts(url: string, now: Date): MessageParts {
+  return parts(`${ICON.web} 웹으로 열기`, [frame(now, `${ICON.web} 웹`, {
+    title: `${ICON.web} 웹으로 열기`,
+    description: '아래 버튼을 누르면 웹 화면이 열려요. 처음 한 번은 친구들과 공유하는 비밀번호를 물어봐요.',
+    color: COLOR.brand,
+  })], [{ type: 1, components: [{ type: 2, style: 5, label: `${ICON.web} 웹으로 열기`, url }] }]);
+}
+
 const rosterLines = (cs: Character[], max = 8) =>
   [...cs].sort((a, b) => b.itemLevel - a.itemLevel).slice(0, max).map((c) => `**${c.name}** · ${c.className} · ${formatLevel(c.itemLevel)}`)
     .concat(cs.length > max ? [`외 ${cs.length - max}명`] : []).join('\n');

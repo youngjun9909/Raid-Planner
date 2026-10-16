@@ -212,7 +212,7 @@ describe('formatPlan', () => {
     const msg = formatPlan(serkaHard, result, all, NOW);
     const buttons = msg.components![0].components;
     expect(buttons.map((b) => b.custom_id)).toEqual(['plan:serka-hard', 'clr:start']);
-    expect(buttons.every((b) => b.type === 2 && b.custom_id.length <= 100)).toBe(true);
+    expect(buttons.every((b) => b.type === 2 && (b.custom_id ?? "").length <= 100)).toBe(true);
   });
 
   it('추천이 없으면 회색 임베드 하나에 사유를 문장으로', () => {

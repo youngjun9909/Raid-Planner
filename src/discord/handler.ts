@@ -6,11 +6,12 @@ import { planRaid } from '@/core/planner';
 import { weekKey } from '@/core/week';
 import type { Character, ClearRecord, Friend, RaidConfig } from '@/core/types';
 import { applyClearChange, formatLevel } from '@/lib/view-model';
+import { getWebUrl } from '@/lib/web-url';
 import { findOwner } from '@/lib/friend-dupes';
 import { COMMANDS, raidTitle } from './commands';
 import {
   characterClearsEmbed, errorParts, formatHelp, formatPlan, formatStatus, registerSuccess,
-  NO_FRIENDS_TEXT, type MessageParts,
+  NO_FRIENDS_TEXT, webLinkParts, type MessageParts,
 } from './format';
 import { ICON } from './theme';
 import {
@@ -106,6 +107,7 @@ async function onCommand(body: DiscordInteraction, deps: Deps, fail: Fail): Prom
       return raid ? planFor(raid, deps, reply, fail) : fail('알 수 없는 레이드예요', FIX.unknownRaid);
     }
     case '클리어': return onClearStart(body, deps, fail);
+    case '웹': return only(privately(webLinkParts(getWebUrl(), deps.now())));
     case '현황': return only(await onStatus(deps));
     default: return fail(UNKNOWN_TEXT, FIX.unknown);
   }

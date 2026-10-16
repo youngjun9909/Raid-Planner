@@ -6,6 +6,7 @@ import { LostArkError } from '@/lostark/client';
 import { RAIDS } from '@/core/raids';
 import { weekKey } from '@/core/week';
 import type { Character, Friend } from '@/core/types';
+import { getWebUrl } from '@/lib/web-url';
 import type { StringSelect } from '@/discord/types';
 
 const NOW = new Date('2026-10-16T03:00:00Z');
@@ -42,8 +43,8 @@ const content = (r: { response: any }) => r.response.data?.content as string;
 const all = (r: { response: any }) => JSON.stringify(r.response.data);
 
 describe('COMMANDS', () => {
-  it('명령어, 등록, 공대, 클리어, 현황', () => {
-    expect(COMMANDS.map((c) => c.name).sort()).toEqual(['공대', '등록', '명령어', '클리어', '현황'].sort());
+  it('명령어, 등록, 공대, 클리어, 현황, 웹', () => {
+    expect(COMMANDS.map((c) => c.name).sort()).toEqual(['공대', '등록', '명령어', '클리어', '현황', '웹'].sort());
   });
   it('모든 COMMANDS에 비어 있지 않은 한글 description이 있다', () => {
     const hangul = /[가-힣]/;
@@ -82,6 +83,37 @@ describe('handleInteraction', () => {
       expect(all(r)).toContain(`/${c.name}`);
       expect(all(r)).toContain(c.description);
     }
+  });
+
+  describe('/웹', () => {
+    it('본인에게만 보이는 링크 버튼 하나를 돌려준다 (custom_id 없음, 주소는 getWebUrl)', async () => {
+      const r = await run(cmd('웹'));
+      expect(r.response.type).toBe(4);
+      expect(r.response.data!.flags).toBe(64);
+      expect(r.response.data!.embeds).toHaveLength(1);
+      expect(r.response.data!.embeds![0].title).toContain('웹으로 열기');
+      const rows = r.response.data!.components!;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].type).toBe(1);
+      expect(rows[0].components).toHaveLength(1);
+      const button = rows[0].components[0] as unknown as Record<string, unknown>;
+      expect(button).toEqual({ type: 2, style: 5, label: '🌐 웹으로 열기', url: getWebUrl() });
+      expect('custom_id' in button).toBe(false);
+    });
+    it('저장소를 읽지 않고, 주소에 비밀번호/토큰이 없다', async () => {
+      const spy = vi.spyOn(store, 'listFriends');
+      const r = await run(cmd('웹'));
+      expect(spy).not.toHaveBeenCalled();
+      expect(all(r)).not.toMatch(/password|token|tok-secret/i);
+    });
+    it('/명령어 목록에 /웹이 나온다', async () => {
+      expect(all(await run(cmd('명령어')))).toContain('/웹');
+    });
+    it('링크 버튼에서 잘못 들어온 컴포넌트 요청도 오류 없이 안내로 거절한다', async () => {
+      const r = await run({ type: 3, token: 't', ...user('u1'), data: { component_type: 2 } });
+      expect(r.response.type).toBe(4);
+      expect(r.response.data!.flags).toBe(64);
+    });
   });
 
   describe('/등록', () => {
@@ -233,7 +265,7 @@ describe('handleInteraction', () => {
       expect(raidSelect.options).toHaveLength(14);
       expect(raidSelect.options.find((o: any) => o.value === 'serka-hard')).toMatchObject({ label: '세르카 하드', default: true });
       expect(raidSelect.options.filter((o: any) => o.default)).toHaveLength(1);
-      for (const row of rows) for (const c of row.components) expect(c.custom_id.length).toBeLessThanOrEqual(100);
+      for (const row of rows) for (const c of row.components) expect((c.custom_id ?? "").length).toBeLessThanOrEqual(100);
     });
 
     it('/클리어 제출: 같은 레이드 두 난이도면 오류, 정상이면 저장되고 /공대 후보에서 그 캐릭터가 빠진다', async () => {
@@ -290,7 +322,7 @@ describe('handleInteraction', () => {
 
     it('단계 사이에 원정대 순서가 바뀌어도 이름으로 찾아 맞는 캐릭터에 저장한다', async () => {
       const step2 = await run(comp('clr:c:fa', ['A1']));
-      const customId = step2.response.data!.components![1].components[0].custom_id;
+      const customId = step2.response.data!.components![1].components[0].custom_id!;
       await store.saveFriend({ ...friendA, characters: [ch('A0-new'), ch('A2-sup', 'support', 2500), ch('A1')] });
       const r = await run(comp(customId, ['serka-hard']));
       expect(content(r)).toContain('A1 클리어 1건 저장했어요');
@@ -314,7 +346,7 @@ describe('handleInteraction', () => {
 
     it('제출한 선택이 메뉴에 있는 레이드 전체를 대신하고, 메뉴에 없는 기록은 지금 저장된 값에서 가져와 남긴다', async () => {
       const step2 = await run(comp('clr:c:fa', ['A1']));
-      const customId = step2.response.data!.components![1].components[0].custom_id;
+      const customId = step2.response.data!.components![1].components[0].custom_id!;
       // 메뉴를 연 뒤 웹에서 바뀐 기록: 메뉴에 있는 레이드(세르카)와 메뉴에 없는 기록(옛 레이드)
       await store.setCharacterClears(WEEK, 'A1', [{ raidName: '세르카', difficulty: '노말' }, { raidName: '옛 레이드', difficulty: '노말' }]);
       await run(comp(customId, ['cathedral-1']));

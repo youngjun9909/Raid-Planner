@@ -65,6 +65,12 @@ export const COMMANDS: CommandDef[] = [
     group: '클리어 관리',
     example: '/현황',
   },
+  {
+    name: '웹',
+    description: '웹 화면으로 가는 버튼을 보여 줘요',
+    group: '시작하기',
+    example: '/웹',
+  },
 ];
 
 /** Discord에 등록할 본문 (group, example 같은 내부 필드는 뺀다). */

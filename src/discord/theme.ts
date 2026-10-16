@@ -18,6 +18,7 @@ export const ICON = {
   error: '⚠️',
   refresh: '🔄',
   empty: '💤',
+  web: '🌐',
 } as const;
 
 export const COLOR = {

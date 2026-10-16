@@ -41,7 +41,9 @@ export interface StringSelect {
 }
 /** style: 1 Primary, 2 Secondary, 3 Success, 4 Danger. */
 export interface Button { type: 2; style: 1 | 2 | 3 | 4; label: string; custom_id: string; emoji?: { name: string }; }
-export interface ActionRow { type: 1; components: (StringSelect | Button)[]; }
+/** 링크 버튼(style 5): custom_id 없이 url만 가지며, 눌러도 봇에 요청이 오지 않는다. */
+export interface LinkButton { type: 2; style: 5; label: string; url: string; custom_id?: undefined; }
+export interface ActionRow { type: 1; components: (StringSelect | Button | LinkButton)[]; }
 
 export interface EmbedField { name: string; value: string; inline?: boolean; }
 export interface Embed {
