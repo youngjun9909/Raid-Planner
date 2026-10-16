@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RAIDS } from '@/core/raids';
-import type { ClearRecord, Friend } from '@/core/types';
+import type { ClearRecord, Friend, Role } from '@/core/types';
 import { ApiError, api, type ClearInput } from '@/lib/api-client';
 import { applyClearChange, recordsAfterChange } from '@/lib/view-model';
 import { createSaveQueue } from '@/lib/save-queue';
@@ -176,6 +176,16 @@ export default function Home() {
     }
   }
 
+  async function saveRole(friendId: string, characterName: string, role: Role | null) {
+    if (!password) return '비밀번호가 필요해요';
+    try {
+      replaceFriend(await api.setRole(password, friendId, characterName, role));
+      return null;
+    } catch (e) {
+      return handle(e);
+    }
+  }
+
   async function addFriend(displayName: string, representativeName: string) {
     if (!password) return '비밀번호가 필요해요';
     try {
@@ -279,7 +289,7 @@ export default function Home() {
                   {notice}
                 </p>
               )}
-              <ClearsTable friends={friends} clears={clears} onClearChange={changeClear} onCombatPower={saveCombatPower} />
+              <ClearsTable friends={friends} clears={clears} onClearChange={changeClear} onCombatPower={saveCombatPower} onRole={saveRole} />
             </section>
 
             <section className="panel" aria-labelledby="sec-pick">

@@ -1,4 +1,4 @@
-import type { ClearRecord, Friend, PlanResult, RaidConfig } from '@/core/types';
+import type { ClearRecord, Friend, PlanResult, RaidConfig, Role } from '@/core/types';
 
 /** API 오류. message는 서버가 보낸 한글 안내, status 0은 네트워크 오류. */
 export class ApiError extends Error {
@@ -37,6 +37,8 @@ export const api = {
   refreshFriend: (pw: string, id: string) => call<Friend>(pw, friendUrl(id, 'refresh'), 'POST'),
   setCombatPower: (pw: string, id: string, characterName: string, cp: number | null) =>
     call<Friend>(pw, friendUrl(id, 'combat-power'), 'PUT', { characterName, cp }),
+  setRole: (pw: string, id: string, characterName: string, role: Role | null) =>
+    call<Friend>(pw, friendUrl(id, 'role'), 'PUT', { characterName, role }),
   getClears: (pw: string) => call<ClearRecord[]>(pw, '/api/clears'),
   putClears: (pw: string, characterName: string, records: ClearInput[]) =>
     call<{ ok: true }>(pw, '/api/clears', 'PUT', { characterName, records }),

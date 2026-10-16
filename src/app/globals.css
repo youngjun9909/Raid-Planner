@@ -651,6 +651,49 @@ select {
   background: var(--dealer-bg);
 }
 
+.role--button {
+  border: 0;
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+.role--button:hover:not(:disabled) {
+  outline: 1px solid currentColor;
+  outline-offset: -1px;
+}
+
+.role--button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.role--button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.role-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s1);
+}
+
+/* 수동 입력 값 표시 (전투력, 역할) */
+.manual-mark {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  padding: 0 var(--s1);
+  border-radius: 4px;
+  border: 1px solid currentColor;
+  opacity: 0.85;
+}
+
 .role--ghost {
   background: transparent;
   outline: 1px dashed currentColor;

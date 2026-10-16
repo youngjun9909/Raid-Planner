@@ -3,6 +3,7 @@ import { createMemoryStore, type Store } from '@/store/store';
 import { GET as getFriends, POST as postFriend } from '@/app/api/friends/route';
 import { POST as refresh } from '@/app/api/friends/[id]/refresh/route';
 import { PUT as putCp } from '@/app/api/friends/[id]/combat-power/route';
+import { PUT as putRole } from '@/app/api/friends/[id]/role/route';
 import { LostArkError } from '@/lostark/client';
 import { req, ch, friend } from './helpers';
 
@@ -71,6 +72,28 @@ describe('POST /api/friends/[id]/refresh', () => {
     await store.saveFriend(friend('a', [ch('A1')]));
     fetchRoster.mockRejectedValue(new LostArkError('rate_limited'));
     expect((await refresh(req('/x', 'POST'), params('a'))).status).toBe(429);
+  });
+});
+
+describe('PUT /api/friends/[id]/role', () => {
+  const put = (id: string, body: unknown) => putRole(req(`/api/friends/${id}/role`, 'PUT', body), params(id));
+  beforeEach(async () => { await store.saveFriend(friend('a', [ch('A1', 'dealer', 1000)])); });
+  it('수동 역할을 저장하고(수동 표시) null로 자동으로 되돌린다', async () => {
+    const res = await put('a', { characterName: 'A1', role: 'support' });
+    expect(res.status).toBe(200);
+    expect((await res.json()).characters[0]).toMatchObject({ role: 'support', manualRole: true });
+    expect((await store.getFriend('a'))!.characters[0].role).toBe('support');
+    expect((await put('a', { characterName: 'A1', role: null })).status).toBe(200);
+    expect((await store.getFriend('a'))!.characters[0]).toMatchObject({ role: 'dealer' });
+    expect((await store.getFriend('a'))!.characters[0].manualRole).toBeUndefined();
+  });
+  it('검증 오류', async () => {
+    expect((await put('zz', { characterName: 'A1', role: 'support' })).status).toBe(404);
+    expect((await put('a', { characterName: 'A1', role: 'tank' })).status).toBe(400);
+    expect((await put('a', { characterName: 'A1' })).status).toBe(400);
+    expect((await put('a', { role: 'support' })).status).toBe(400);
+    expect((await put('a', { characterName: 'Nope', role: 'support' })).status).toBe(400);
+    expect((await putRole(req('/x', 'PUT', { characterName: 'A1', role: 'support' }, 'bad'), params('a'))).status).toBe(401);
   });
 });
 

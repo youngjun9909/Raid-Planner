@@ -83,6 +83,41 @@ describe.each([
     expect((await s.getFriend('f1'))!.characters.map((c) => c.combatPower)).toEqual([3000, null]);
   });
 
+  it('수동 전투력이 적용된 캐릭터에는 manualCombatPower 표시가 붙는다', async () => {
+    await s.saveFriend(friend());
+    await s.setManualCombatPower('f1', 'Beta', 2000);
+    const [alpha, beta] = (await s.getFriend('f1'))!.characters;
+    expect(beta.manualCombatPower).toBe(true);
+    expect(alpha.manualCombatPower).toBeUndefined();
+    await s.setManualCombatPower('f1', 'Beta', null);
+    expect((await s.getFriend('f1'))!.characters[1].manualCombatPower).toBeUndefined();
+  });
+
+  it('setManualRole이 자동 역할보다 우선하고(수동 표시), null로 지우면 자동 역할로 돌아간다', async () => {
+    await s.saveFriend(friend());
+    await s.setManualRole('f1', 'Alpha', 'support');
+    await s.setManualRole('f1', 'Beta', 'dealer');
+    let f = (await s.getFriend('f1'))!;
+    expect(f.characters.map((c) => c.role)).toEqual(['support', 'dealer']);
+    expect(f.characters.map((c) => c.manualRole)).toEqual([true, true]);
+    expect((await s.listFriends())[0].characters[0].role).toBe('support');
+    await s.setManualRole('f1', 'Alpha', null);
+    f = (await s.getFriend('f1'))!;
+    expect(f.characters.map((c) => c.role)).toEqual(['dealer', 'dealer']);
+    expect(f.characters[0].manualRole).toBeUndefined();
+    // 로스터를 새로 저장해도(주간 갱신) 수동 역할은 남는다
+    await s.saveFriend(friend({ displayName: 'B' }));
+    expect((await s.getFriend('f1'))!.characters[1]).toMatchObject({ role: 'dealer', manualRole: true });
+  });
+
+  it('saveFriend는 수동 표시(manual*) 필드를 저장하지 않는다', async () => {
+    const marked = friend();
+    marked.characters[0] = { ...marked.characters[0], manualCombatPower: true, manualRole: true };
+    await s.saveFriend(marked);
+    expect(await s.getFriend('f1')).toEqual(friend());
+    expect((await s.getFriend('f1'))!.characters[0]).not.toHaveProperty('manualRole');
+  });
+
   it('saveFriend는 기존 수동 전투력과 discordUserId를 유지한다', async () => {
     await s.saveFriend(friend({ discordUserId: 'd1' }));
     await s.setManualCombatPower('f1', 'Alpha', 5000);

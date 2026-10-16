@@ -1,5 +1,5 @@
 import { Redis } from '@upstash/redis';
-import type { ClearRecord, Friend } from '@/core/types';
+import type { Character, ClearRecord, Friend, Role } from '@/core/types';
 import { isProduction } from '@/lib/env';
 
 export interface Store {
@@ -7,26 +7,45 @@ export interface Store {
   getFriend(id: string): Promise<Friend | undefined>;
   saveFriend(f: Friend): Promise<void>;
   setManualCombatPower(friendId: string, characterName: string, cp: number | null): Promise<void>;
+  /** 캐릭터 역할 수동 지정. null이면 지정을 지워 자동 판별로 돌아간다. */
+  setManualRole(friendId: string, characterName: string, role: Role | null): Promise<void>;
   getClears(week: string): Promise<ClearRecord[]>;
   setCharacterClears(week: string, characterName: string, records: Omit<ClearRecord, 'characterName'>[]): Promise<void>;
   deleteWeek(week: string): Promise<void>;
 }
 
 type Manual = Record<string, number>;
+type ManualRoles = Record<string, Role>;
 type ClearBody = Omit<ClearRecord, 'characterName'>;
 
-function withManual(f: Friend, manual: Manual): Friend {
+const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
+const isRole = (v: unknown): v is Role => v === 'support' || v === 'dealer';
+
+/** 수동 전투력/역할을 덮어쓰고 수동 표시를 붙인다. 수동 값이 API 값보다 우선한다. */
+function withManual(f: Friend, manual: Manual, roles: ManualRoles = {}): Friend {
   return {
     ...f,
-    characters: f.characters.map((c) =>
-      Object.prototype.hasOwnProperty.call(manual, c.name) ? { ...c, combatPower: manual[c.name] } : { ...c },
-    ),
+    characters: f.characters.map((c) => {
+      const out: Character = { ...c };
+      if (has(manual, c.name)) Object.assign(out, { combatPower: manual[c.name], manualCombatPower: true });
+      if (has(roles, c.name)) Object.assign(out, { role: roles[c.name], manualRole: true });
+      return out;
+    }),
+  };
+}
+
+/** 저장 직전: 읽을 때만 붙는 수동 표시는 버린다. */
+function stripMarks(f: Friend): Friend {
+  return {
+    ...f,
+    characters: f.characters.map(({ manualCombatPower: _cp, manualRole: _role, ...c }) => c),
   };
 }
 
 function mergeSaved(next: Friend, prev: Friend | undefined): Friend {
-  if (!prev) return next;
-  return { ...next, discordUserId: next.discordUserId ?? prev.discordUserId };
+  const clean = stripMarks(next);
+  if (!prev) return clean;
+  return { ...clean, discordUserId: clean.discordUserId ?? prev.discordUserId };
 }
 
 function flattenClears(byChar: Record<string, ClearBody[]>): ClearRecord[] {
@@ -38,8 +57,9 @@ function flattenClears(byChar: Record<string, ClearBody[]>): ClearRecord[] {
 export function createMemoryStore(): Store {
   const friends = new Map<string, Friend>();
   const manual = new Map<string, Manual>();
+  const roles = new Map<string, ManualRoles>();
   const clears = new Map<string, Record<string, ClearBody[]>>();
-  const view = (f: Friend) => withManual(structuredClone(f), manual.get(f.id) ?? {});
+  const view = (f: Friend) => withManual(structuredClone(f), manual.get(f.id) ?? {}, roles.get(f.id) ?? {});
   return {
     async listFriends() { return [...friends.values()].map(view); },
     async getFriend(id) { const f = friends.get(id); return f ? view(f) : undefined; },
@@ -48,6 +68,11 @@ export function createMemoryStore(): Store {
       const m = { ...(manual.get(friendId) ?? {}) };
       if (cp === null) delete m[name]; else m[name] = cp;
       manual.set(friendId, m);
+    },
+    async setManualRole(friendId, name, role) {
+      const m = { ...(roles.get(friendId) ?? {}) };
+      if (role === null) delete m[name]; else m[name] = role;
+      roles.set(friendId, m);
     },
     async getClears(week) { return flattenClears(structuredClone(clears.get(week) ?? {})); },
     async setCharacterClears(week, name, records) {
@@ -69,7 +94,8 @@ function parseJson<T>(v: unknown): T | undefined {
 }
 
 // Redis methods used: get, set, del, sadd, smembers, hget, hset, hgetall, hdel
-// Keys: friend:<id> (JSON), friends (set of ids), manual:<id> (hash name -> cp), clears:<week> (hash name -> JSON)
+// Keys: friend:<id> (JSON), friends (set of ids), manual:<id> (hash name -> cp),
+//       role:<id> (hash name -> 'support'|'dealer'), clears:<week> (hash name -> JSON)
 export function createUpstashStore(redis: Redis): Store {
   const readManual = async (id: string): Promise<Manual> => {
     const raw = (await redis.hgetall(`manual:${id}`)) as Record<string, unknown> | null;
@@ -80,11 +106,19 @@ export function createUpstashStore(redis: Redis): Store {
     }
     return out;
   };
+  const readRoles = async (id: string): Promise<ManualRoles> => {
+    const raw = (await redis.hgetall(`role:${id}`)) as Record<string, unknown> | null;
+    const out: ManualRoles = {};
+    for (const [k, v] of Object.entries(raw ?? {})) if (isRole(v)) out[k] = v;
+    return out;
+  };
   const readFriend = async (id: string): Promise<Friend | undefined> =>
     parseJson<Friend>(await redis.get(`friend:${id}`));
   const getFriend = async (id: string): Promise<Friend | undefined> => {
     const f = await readFriend(id);
-    return f ? withManual(f, await readManual(id)) : undefined;
+    if (!f) return undefined;
+    const [manual, roles] = await Promise.all([readManual(id), readRoles(id)]);
+    return withManual(f, manual, roles);
   };
   const listFriends = async (): Promise<Friend[]> => {
     // auto-deserializing clients may return numeric-looking ids as numbers; ids are only
@@ -104,6 +138,10 @@ export function createUpstashStore(redis: Redis): Store {
     async setManualCombatPower(friendId, name, cp) {
       if (cp === null) await redis.hdel(`manual:${friendId}`, name);
       else await redis.hset(`manual:${friendId}`, { [name]: String(cp) });
+    },
+    async setManualRole(friendId, name, role) {
+      if (role === null) await redis.hdel(`role:${friendId}`, name);
+      else await redis.hset(`role:${friendId}`, { [name]: role });
     },
     async getClears(week) {
       const raw = (await redis.hgetall(`clears:${week}`)) as Record<string, unknown> | null;

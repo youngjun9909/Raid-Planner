@@ -43,7 +43,15 @@ beforeEach(() => {
       if (url === '/api/plan') return json({ ...planResult, raid: { id: body.raidId } });
       if (url.endsWith('/combat-power')) {
         const f = structuredClone(FRIENDS[0]);
-        f.characters[1].combatPower = body.cp;
+        const c = f.characters.find((x) => x.name === body.characterName)!;
+        if (body.cp === null) c.combatPower = c.name === '가나' ? 2500 : null;
+        else Object.assign(c, { combatPower: body.cp, manualCombatPower: true });
+        return json(f);
+      }
+      if (url.endsWith('/role')) {
+        const f = structuredClone(FRIENDS[0]);
+        const c = f.characters.find((x) => x.name === body.characterName)!;
+        if (body.role) Object.assign(c, { role: body.role, manualRole: true });
         return json(f);
       }
       return json({ error: 'not mocked' }, 500);
@@ -175,6 +183,36 @@ describe('웹 화면', () => {
     expect(call.method).toBe('PUT');
     expect(call.body).toEqual({ characterName: '가나서폿', cp: 1800 });
     expect(await screen.findByText('1,800')).toBeInTheDocument();
+  });
+
+  it('수동 전투력에는 "수동" 표시와 자동 값으로 되돌리는 버튼이 있다', async () => {
+    await renderLoaded();
+    const input = screen.getByRole('spinbutton', { name: '가나서폿 전투력' });
+    fireEvent.change(input, { target: { value: '1800' } });
+    fireEvent.submit(input.closest('form')!);
+    const reset = await screen.findByRole('button', { name: '가나서폿 전투력 자동 값으로 되돌리기' });
+    expect(reset.closest('.cp')).toHaveTextContent('수동');
+    expect(screen.getByRole('button', { name: '가나 전투력 수정' }).closest('.cp')).not.toHaveTextContent('수동');
+    fireEvent.click(reset);
+    await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/combat-power'))).toHaveLength(2));
+    expect(calls.filter((c) => c.url.endsWith('/combat-power'))[1].body).toEqual({ characterName: '가나서폿', cp: null });
+  });
+
+  it('역할 배지를 누르면 수동 역할로 바꾸고(수동 표시), 다시 누르면 자동으로 되돌린다', async () => {
+    await renderLoaded();
+    const badge = screen.getByRole('button', { name: '가나 역할: 딜러 (자동). 누르면 서포터로 바꿔요' });
+    expect(badge).not.toHaveTextContent('수동');
+    fireEvent.click(badge);
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/role'))).toBe(true));
+    const call = calls.find((c) => c.url.endsWith('/role'))!;
+    expect(call).toMatchObject({ url: '/api/friends/f1/role', method: 'PUT', body: { characterName: '가나', role: 'support' } });
+    const manual = await screen.findByRole('button', { name: '가나 역할: 서포터 (수동). 누르면 자동으로 되돌려요' });
+    expect(manual).toHaveTextContent('서포터');
+    expect(manual).toHaveTextContent('수동');
+    fireEvent.click(manual);
+    await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/role'))).toHaveLength(2));
+    expect(calls.filter((c) => c.url.endsWith('/role'))[1].body).toEqual({ characterName: '가나', role: null });
+    expect(await screen.findByRole('button', { name: '가나 역할: 딜러 (자동). 누르면 서포터로 바꿔요' })).toBeInTheDocument();
   });
 
   it('저장된 비밀번호가 없으면 비밀번호 입력창을 먼저 보여 준다', async () => {
