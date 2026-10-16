@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   clipLines, clipText, embedSize, errorParts, fitEmbeds, fitMessage, formatHelp, formatPlan, formatStatus, gauge,
-  characterClearsEmbed, registerSuccess, raidTitle, sanitizeEmbed, LIMITS, MAX_CONTENT, TIER_TEXT,
+  characterClearsEmbed, registerSuccess, BLOCK_SEPARATOR, raidTitle, sanitizeEmbed, LIMITS, MAX_CONTENT, TIER_TEXT,
 } from '@/discord/format';
 import { COLOR, ICON, TIER_COLOR } from '@/discord/theme';
 import { COMMANDS } from '@/discord/commands';
@@ -166,8 +166,10 @@ describe('formatPlan', () => {
     const lines = e1.fields![0].value.split('\n');
     expect(lines[0]).toBe('`▰▰▰▰▰▰▰▰▰▰ 106%`');
     expect(lines[1]).toBe('⚔️ **A1** · 1745 · CP 3,800 · 철수');
-    expect(lines[2]).toBe('🛡️ **B1** · 1740 · 영희');
-    expect(lines.filter((l) => l === '➕ 외부 딜러 구하기')).toHaveLength(2);
+    // 딜러 먼저(친구 → 외부), 서포터는 맨 아래
+    expect(lines[2]).toBe('➕ 외부 딜러 구하기');
+    expect(lines[3]).toBe('➕ 외부 딜러 구하기');
+    expect(lines[4]).toBe('🛡️ **B1** · 1740 · 영희');
     // 같은 친구(철수)가 2공대에 다른 캐릭터로
     expect(e1.fields![2].value).toContain('⚔️ **A2** · 1740 · CP 3,000 · 철수');
     expect(e1.fields![2].value).toContain('➕ 외부 서포터 구하기');
@@ -175,6 +177,20 @@ describe('formatPlan', () => {
     expect(e1.footer!.text).toContain('🗓️ 이번 주: 2026-10-14 수요일 06:00 초기화');
     expect(msg.content).toBe('🏰 세르카 하드 공대 추천 2개를 찾았어요');
     expect(JSON.stringify(msg)).not.toContain('분배');
+  });
+
+  it('8인 공대: 딜러 3 → 서포터 1 두 묶음을 구분선으로 나눈다', () => {
+    const kz = getRaid('kazeros-hard')!;
+    const ds = [1, 2, 3, 4, 5, 6].map((i) => ch(`D${i}`, 'dealer', i * 1000, 1740));
+    const sup = [ch('S1', 'support', null, 1750), ch('S2', 'support', null, 1745)];
+    const fs8 = [fr('a', '철수', [...ds, ...sup])];
+    const slots: Slot[] = [sup[1], ...ds, sup[0]].map((c) => ({ kind: 'friend', friendId: 'a', character: c }));
+    const cand8: Candidate = { summary: summary({ externalCount: 0, externalSupports: 0, externalDealers: 0 }), imbalance: 0, parties: [party('comfortable', 3500, slots)] };
+    const msg = formatPlan(kz, { candidates: [cand8], excluded: [] }, fs8, NOW);
+    expectValidEmbeds(msg.embeds);
+    const lines = msg.embeds[0].fields![0].value.split('\n').slice(1); // 게이지 줄 제외
+    const names = lines.map((l) => (l === BLOCK_SEPARATOR ? '--' : /\*\*(\w+)\*\*/.exec(l)![1]));
+    expect(names).toEqual(['D6', 'D3', 'D2', 'S1', '--', 'D5', 'D4', 'D1', 'S2']);
   });
 
   it('외부 인원이 없으면 "친구들만으로 구성 가능"', () => {

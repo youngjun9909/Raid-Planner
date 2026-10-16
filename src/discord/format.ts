@@ -6,6 +6,7 @@ import { RAIDS } from '@/core/raids';
 import { weekKey } from '@/core/week';
 import type { Candidate, Character, ClearRecord, Friend, Party, PlanResult, RaidConfig, Slot, Tier } from '@/core/types';
 import { countExternals, formatCP, formatLevel, formatRange, planSummaryText } from '@/lib/view-model';
+import { arrangeParty } from '@/lib/arrange-party';
 import { COMMAND_GROUPS, raidTitle, type CommandDef } from './commands';
 import { BOT_NAME, COLOR, GAUGE, ICON, TIER_BADNESS, TIER_COLOR, TIER_TEXT } from './theme';
 import type { ActionRow, Embed, EmbedField } from './types';
@@ -165,21 +166,36 @@ function memberLine(slot: Slot, names: Map<string, string>, detail: Detail = 0):
     : `${ICON.dealer} **${c.name}**${level} · CP ${formatCP(c.combatPower)} · ${owner}`;
 }
 
-function memberLines(p: Party, names: Map<string, string>, detail: Detail): string[] {
-  if (detail === 0) return p.slots.map((s) => memberLine(s, names));
-  const friends = p.slots.filter((s) => s.kind === 'friend').map((s) => memberLine(s, names, detail));
-  const { support, dealer } = countExternals(p.slots);
-  return [
-    ...friends,
-    ...(support ? [`${ICON.external} 외부 서포터 ${support}명 구하기`] : []),
-    ...(dealer ? [`${ICON.external} 외부 딜러 ${dealer}명 구하기`] : []),
-  ];
+/** 8인 공대의 두 4인 파티 사이 구분선. */
+export const BLOCK_SEPARATOR = '┈┈┈┈┈┈┈┈';
+
+/** 구성원 줄: 4인은 딜러 3 → 서포터 1, 8인은 그 묶음 둘을 구분선으로 나눈다 (arrangeParty 순서). */
+function memberLines(p: Party, names: Map<string, string>, detail: Detail, size: number): string[] {
+  const blocks = arrangeParty(p, size);
+  const lines = blocks.map((block) => {
+    if (detail === 0) return block.map((s) => memberLine(s, names));
+    // 줄이는 단계: 같은 역할의 외부인 연속 자리는 한 줄로 합친다 (순서는 그대로).
+    const out: string[] = [];
+    for (let i = 0; i < block.length; i++) {
+      const s = block[i];
+      if (s.kind === 'friend') { out.push(memberLine(s, names, detail)); continue; }
+      let n = 1;
+      while (i + 1 < block.length) {
+        const nx = block[i + 1];
+        if (nx.kind !== 'external' || nx.role !== s.role) break;
+        n++; i++;
+      }
+      out.push(`${ICON.external} 외부 ${s.role === 'support' ? '서포터' : '딜러'} ${n}명 구하기`);
+    }
+    return out;
+  });
+  return lines.flatMap((l, i) => (i > 0 ? [BLOCK_SEPARATOR, ...l] : l));
 }
 
 /** 공대 칸: 이름 "1공대 · 평균 3,900 🟢 여유", 값은 게이지 + 구성원 줄. */
 function partyField(p: Party, i: number, raid: RaidConfig, names: Map<string, string>, detail: Detail = 0): EmbedField {
   const avg = p.dealerAvgCP === null ? '정보 없음' : formatCP(p.dealerAvgCP);
-  const lines = memberLines(p, names, detail);
+  const lines = memberLines(p, names, detail, raid.size);
   return {
     name: `${i + 1}공대 · 평균 ${avg} ${TIER_TEXT[p.tier]}`,
     value: (detail < 2 ? [`\`${gauge(p.dealerAvgCP, raid.recommendedCP.min)}\``, ...lines] : lines).join('\n'),
