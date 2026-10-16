@@ -863,6 +863,59 @@ select {
   outline-offset: 2px;
 }
 
+/* ---------- 이번 주 클리어: 친구 필터 ---------- */
+
+.filter-bar {
+  display: flex;
+  gap: var(--s2);
+  margin-bottom: var(--s4);
+  padding-bottom: var(--s2);
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+@media (min-width: 720px) {
+  .filter-bar {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+}
+
+.filter-chip {
+  flex: none;
+  min-height: 40px;
+  padding: 8px var(--s4);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 500;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background-color 120ms, border-color 120ms;
+}
+
+.filter-chip:hover {
+  border-color: var(--accent);
+}
+
+.filter-chip[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.filter-chip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.filter-chip__count {
+  font-size: var(--fs-xs);
+  opacity: 0.75;
+}
+
 /* ---------- 공대 후보 ---------- */
 
 .plans {

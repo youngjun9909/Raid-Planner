@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { Character, ClearRecord, Friend, Role } from '@/core/types';
 import { RAID_GROUPS, ROLE_LABEL, clearValue, formatLevel } from '@/lib/view-model';
+import { sortCharactersByPower } from '@/lib/character-sort';
 import { CombatPowerCell } from './CombatPowerCell';
 
 /**
@@ -50,12 +51,15 @@ function RoleToggle({ character, onSave }: { character: Character; onSave: (role
 /** 친구 × 캐릭터 표. 레이드 이름마다 드롭다운 하나라서 한 레이드에 두 난이도가 동시에 표시될 수 없다. */
 export function ClearsTable({
   friends,
+  showFriendNames = true,
   clears,
   onClearChange,
   onCombatPower,
   onRole,
 }: {
   friends: Friend[];
+  /** 한 친구만 보여 줄 때는 친구 이름 줄을 생략한다. */
+  showFriendNames?: boolean;
   clears: ClearRecord[];
   onClearChange: (characterName: string, raidName: string, difficulty: string) => void;
   onCombatPower: (friendId: string, characterName: string, cp: number | null) => Promise<string | null>;
@@ -85,11 +89,13 @@ export function ClearsTable({
         </thead>
         {friends.map((f) => (
           <tbody key={f.id} className="roster__group">
-            <tr className="roster__friend">
-              <th scope="rowgroup" colSpan={4 + RAID_GROUPS.length}>
-                <span className="roster__friend-name">{f.displayName}</span>
-              </th>
-            </tr>
+            {showFriendNames && (
+              <tr className="roster__friend">
+                <th scope="rowgroup" colSpan={4 + RAID_GROUPS.length}>
+                  <span className="roster__friend-name">{f.displayName}</span>
+                </th>
+              </tr>
+            )}
             {f.characters.length === 0 && (
               <tr>
                 <td colSpan={4 + RAID_GROUPS.length} className="muted">
@@ -97,7 +103,7 @@ export function ClearsTable({
                 </td>
               </tr>
             )}
-            {f.characters.map((c) => (
+            {sortCharactersByPower(f.characters).map((c) => (
               <tr key={c.name}>
                 <th scope="row" className="roster__sticky roster__char">
                   <span className="roster__char-name">{c.name}</span>

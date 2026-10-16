@@ -9,9 +9,11 @@ import { createSaveQueue } from '@/lib/save-queue';
 import { PasswordGate, readStoredPassword, storePassword } from '@/components/PasswordGate';
 import { FriendsPanel } from '@/components/FriendsPanel';
 import { ClearsTable } from '@/components/ClearsTable';
+import { ALL_FILTER, ClearsFilter } from '@/components/ClearsFilter';
 import { RaidPicker } from '@/components/RaidPicker';
 import { PlanBoard, type PlanState } from '@/components/PlanBoard';
 
+const CLEARS_FILTER_KEY = 'loa.clearsFilter';
 const message = (e: unknown) => (e instanceof Error ? e.message : '알 수 없는 오류가 났어요');
 
 /** 다음 주간 초기화(수요일 06:00 KST)까지 남은 시간. */
@@ -37,6 +39,7 @@ export default function Home() {
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [absent, setAbsent] = useState<Set<string>>(new Set());
+  const [clearsFilter, setClearsFilter] = useState<string>(ALL_FILTER);
   const [version, setVersion] = useState(0);
   const [plans, setPlans] = useState<Record<string, PlanState>>({});
   const [resetIn, setResetIn] = useState<string | null>(null);
@@ -95,6 +98,25 @@ export default function Home() {
   }, [load]);
 
   const raidIds = useMemo(() => RAIDS.filter((r) => selected.includes(r.id)).map((r) => r.id), [selected]);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(CLEARS_FILTER_KEY);
+      if (stored) setClearsFilter(stored);
+    } catch {
+      // 저장소를 못 쓰는 환경이어도 필터는 이번 방문 동안 동작한다.
+    }
+  }, []);
+  // 저장된/선택한 친구가 없어졌으면(삭제 등) 전체로 본다. 표시용 필터일 뿐 참석자와는 무관하다.
+  const activeFilter = friends?.some((f) => f.id === clearsFilter) ? clearsFilter : ALL_FILTER;
+  function chooseClearsFilter(id: string) {
+    setClearsFilter(id);
+    try {
+      localStorage.setItem(CLEARS_FILTER_KEY, id);
+    } catch {
+      // 무시
+    }
+  }
+
   const attendeeIds = useMemo(() => (friends ?? []).filter((f) => !absent.has(f.id)).map((f) => f.id), [friends, absent]);
   const raidKey = raidIds.join(',');
   const attendeeKey = attendeeIds.join(',');
@@ -310,7 +332,15 @@ export default function Home() {
                   {notice}
                 </p>
               )}
-              <ClearsTable friends={friends} clears={clears} onClearChange={changeClear} onCombatPower={saveCombatPower} onRole={saveRole} />
+              <ClearsFilter friends={friends} value={activeFilter} onChange={chooseClearsFilter} />
+              <ClearsTable
+                friends={activeFilter === ALL_FILTER ? friends : friends.filter((f) => f.id === activeFilter)}
+                showFriendNames={activeFilter === ALL_FILTER}
+                clears={clears}
+                onClearChange={changeClear}
+                onCombatPower={saveCombatPower}
+                onRole={saveRole}
+              />
             </section>
 
             <section className="panel" aria-labelledby="sec-pick">

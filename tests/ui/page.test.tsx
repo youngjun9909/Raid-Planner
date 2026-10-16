@@ -38,6 +38,8 @@ beforeEach(() => {
       const password = (init.headers as Record<string, string> | undefined)?.['x-app-password'] ?? null;
       calls.push({ url, method, body, password });
       if (url === '/api/friends' && method === 'GET') return json(FRIENDS);
+      if (url === '/api/friends' && method === 'POST')
+        return json({ id: 'f3', displayName: body.displayName, representativeName: body.representativeName, characters: [ch(body.representativeName)] });
       if (url === '/api/clears' && method === 'GET') return json(clears);
       if (url === '/api/clears' && method === 'PUT') return putResponder ? putResponder(body) : json({ ok: true });
       if (url === '/api/plan') return json({ ...planResult, raid: { id: body.raidId } });
@@ -347,6 +349,110 @@ describe('웹 화면', () => {
       const id = a.getAttribute('aria-labelledby')!;
       expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);
       expect(a.querySelector(`[id="${id}"]`)).not.toBeNull();
+    }
+  });
+});
+
+describe('이번 주 클리어 친구 필터', () => {
+  const FILTER_KEY = 'loa.clearsFilter';
+  const chip = (name: RegExp | string) => screen.getByRole('button', { name });
+  const filterGroup = () => screen.getByRole('group', { name: '친구별로 보기' });
+
+  it('전체 + 친구별 칩이 캐릭터 수와 함께 button/aria-pressed로 보인다', async () => {
+    await renderLoaded();
+    const buttons = within(filterGroup()).getAllByRole('button');
+    expect(buttons.map((b) => b.textContent)).toEqual(['전체 3', '영준 2', '민수 1']);
+    expect(within(filterGroup()).getByRole('button', { name: /^전체/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(filterGroup()).getByRole('button', { name: /^영준/ })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('친구 칩을 누르면 그 친구 캐릭터만, 전체를 누르면 모두 보인다', async () => {
+    await renderLoaded();
+    fireEvent.click(within(filterGroup()).getByRole('button', { name: /^민수/ }));
+    expect(screen.getByRole('combobox', { name: '다라 세르카 클리어' })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: '가나 세르카 클리어' })).not.toBeInTheDocument();
+    expect(within(filterGroup()).getByRole('button', { name: /^민수/ })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(within(filterGroup()).getByRole('button', { name: /^전체/ }));
+    expect(screen.getByRole('combobox', { name: '가나 세르카 클리어' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '다라 세르카 클리어' })).toBeInTheDocument();
+  });
+
+  it('필터를 골라도 참석자와 공대 요청은 바뀌지 않는다', async () => {
+    await renderLoaded();
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
+    await waitFor(() => expect(planCalls().length).toBeGreaterThan(0));
+    const before = planCalls().length;
+    const checked = () => screen.getAllByRole('checkbox').map((x) => (x as HTMLInputElement).checked);
+    const snapshot = checked();
+    fireEvent.click(within(filterGroup()).getByRole('button', { name: /^민수/ }));
+    expect(checked()).toEqual(snapshot);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(planCalls().length).toBe(before);
+  });
+
+  it('새로 등록한 친구도 칩이 생기고, 선택한 친구를 삭제하면 전체로 돌아간다', async () => {
+    await renderLoaded();
+    fireEvent.change(screen.getByPlaceholderText('예: 영준'), { target: { value: '철수' } });
+    fireEvent.change(screen.getByPlaceholderText('게임 속 캐릭터 이름'), { target: { value: '마바' } });
+    fireEvent.click(screen.getByRole('button', { name: '원정대 불러오기' }));
+    await within(filterGroup()).findByRole('button', { name: /^철수/ });
+    fireEvent.click(within(filterGroup()).getByRole('button', { name: /^영준/ }));
+    fireEvent.click(screen.getByRole('button', { name: '영준 삭제' }));
+    fireEvent.click(within(screen.getByRole('group', { name: '영준 삭제 확인' })).getByRole('button', { name: '삭제하기' }));
+    await waitFor(() => expect(within(filterGroup()).queryByRole('button', { name: /^영준/ })).not.toBeInTheDocument());
+    expect(within(filterGroup()).getByRole('button', { name: /^전체/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('combobox', { name: '다라 세르카 클리어' })).toBeInTheDocument();
+  });
+
+  it('저장된 필터를 적용하고, 선택 시 저장한다', async () => {
+    localStorage.setItem(FILTER_KEY, 'f2');
+    render(<Home />);
+    await screen.findByRole('combobox', { name: '다라 세르카 클리어' });
+    expect(screen.queryByRole('combobox', { name: '가나 세르카 클리어' })).not.toBeInTheDocument();
+    fireEvent.click(within(filterGroup()).getByRole('button', { name: /^영준/ }));
+    expect(localStorage.getItem(FILTER_KEY)).toBe('f1');
+  });
+
+  it('저장된 값이 없는 친구를 가리키면 무시한다', async () => {
+    localStorage.setItem(FILTER_KEY, 'ghost');
+    await renderLoaded();
+    expect(screen.getByRole('combobox', { name: '다라 세르카 클리어' })).toBeInTheDocument();
+    expect(within(filterGroup()).getByRole('button', { name: /^전체/ })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('저장소가 오류를 던져도 화면은 동작한다', async () => {
+    const orig = Storage.prototype.getItem;
+    const origSet = Storage.prototype.setItem;
+    Storage.prototype.getItem = function (k: string) {
+      if (k === FILTER_KEY) throw new Error('blocked');
+      return orig.call(this, k);
+    };
+    Storage.prototype.setItem = function (k: string, v: string) {
+      if (k === FILTER_KEY) throw new Error('blocked');
+      return origSet.call(this, k, v);
+    };
+    try {
+      await renderLoaded();
+      fireEvent.click(within(filterGroup()).getByRole('button', { name: /^민수/ }));
+      expect(screen.queryByRole('combobox', { name: '가나 세르카 클리어' })).not.toBeInTheDocument();
+    } finally {
+      Storage.prototype.getItem = orig;
+      Storage.prototype.setItem = origSet;
+    }
+  });
+
+  it('그룹 안에서 전투력 높은 순으로 보이고 전투력 없는 캐릭터는 뒤에 온다', async () => {
+    FRIENDS[0].characters = [ch('낮음', 'dealer', 100), ch('없음', 'dealer', null, 1800), ch('높음', 'dealer', 3000)];
+    try {
+      render(<Home />);
+      await screen.findByRole('combobox', { name: '높음 세르카 클리어' });
+      const names = screen.getAllByRole('combobox')
+        .map((s) => s.getAttribute('aria-label')!)
+        .filter((l) => l.endsWith('세르카 클리어'))
+        .map((l) => l.split(' ')[0]);
+      expect(names).toEqual(['높음', '낮음', '없음', '다라']);
+    } finally {
+      FRIENDS[0].characters = [ch('가나'), ch('가나서폿', 'support', null)];
     }
   });
 });
