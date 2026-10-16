@@ -112,7 +112,7 @@ describe('formatPlan', () => {
   });
   // 추천 1: 철수가 A1(숙련)로 1공대, A2(클경)로 2공대 / 영희는 1공대 (숙련도 없음 = 반숙)
   const first: Candidate = {
-    summary: summary({}), imbalance: 800, unplaced: [],
+    kind: 'recommended', summary: summary({}), imbalance: 800, unplaced: [],
     parties: [
       party('comfortable', 3800, [
         { kind: 'friend', friendId: 'a', character: friends[0].characters[0], proficiency: '숙련' },
@@ -129,7 +129,7 @@ describe('formatPlan', () => {
     ],
   };
   const second: Candidate = {
-    summary: summary({}), imbalance: 0, unplaced: [],
+    kind: 'recommended', summary: summary({}), imbalance: 0, unplaced: [],
     parties: [
       party('unknown', null, [
         { kind: 'friend', friendId: 'b', character: friends[1].characters[0] },
@@ -213,7 +213,7 @@ describe('formatPlan', () => {
     const sup = [ch('S1', 'support', null, 1750), ch('S2', 'support', null, 1745)];
     const fs8 = [fr('a', '철수', [...ds, ...sup])];
     const slots: Slot[] = [sup[1], ...ds, sup[0]].map((c) => ({ kind: 'friend', friendId: 'a', character: c }));
-    const cand8: Candidate = { summary: summary({ externalCount: 0, externalSupports: 0, externalDealers: 0, friendThreshold: 1 }), imbalance: 0, unplaced: [], parties: [party('comfortable', 3500, slots)] };
+    const cand8: Candidate = { kind: 'recommended', summary: summary({ externalCount: 0, externalSupports: 0, externalDealers: 0, friendThreshold: 1 }), imbalance: 0, unplaced: [], parties: [party('comfortable', 3500, slots)] };
     const msg = formatPlan(kz, { candidates: [cand8], excluded: [] }, fs8, NOW);
     expectValidEmbeds(msg.embeds);
     const lines = msg.embeds[0].fields![0].value.split('\n').slice(1); // 게이지 줄 제외
@@ -225,7 +225,7 @@ describe('formatPlan', () => {
     const r: PlanResult = {
       candidates: [{
         summary: summary({ friendCount: 1, characterCount: 1, partyCount: 1, externalCount: 0, externalSupports: 0, externalDealers: 0, friendThreshold: 1 }),
-        imbalance: 0, unplaced: [],
+        kind: 'recommended', imbalance: 0, unplaced: [],
         parties: [party('tight', 3300, [{ kind: 'friend', friendId: 'a', character: friends[0].characters[0] }])],
       }],
       excluded: [],
@@ -254,7 +254,7 @@ describe('formatPlan', () => {
   it('추천이 10개를 넘어도 임베드는 10개까지, 합계 6000자 안 (작은 추천 12개)', () => {
     const small: Candidate = {
       summary: summary({ friendCount: 1, characterCount: 1, partyCount: 1, externalCount: 3, externalSupports: 1, externalDealers: 2, friendThreshold: 1 }),
-      imbalance: 0, unplaced: [],
+      kind: 'recommended', imbalance: 0, unplaced: [],
       parties: [party('tight', 3300, [
         { kind: 'friend', friendId: 'a', character: friends[0].characters[0] },
         { kind: 'external', role: 'support' }, { kind: 'external', role: 'dealer' }, { kind: 'external', role: 'dealer' },

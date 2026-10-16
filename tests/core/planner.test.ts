@@ -118,8 +118,11 @@ describe('planRaid: 공대 규칙 (편성 수 · 친구 최소 인원)', () => {
     const r = planRaid({ raid: serkaHard, friends: fs, clears: [], attendeeIds: ['yj', 'hj'] });
     expect(r.reason).toBeUndefined();
     expect(r.excluded).toEqual([]);
-    expect(r.candidates.length).toBe(2); // 현준X 또는 현준Y
-    for (const c of r.candidates) {
+    // 추천 2개 + 맨 끝에 "모두 편성" 대안 1개 (대안은 아래 '모두 편성' 테스트에서 따로 본다)
+    const recommended = r.candidates.filter((c) => c.kind === 'recommended');
+    expect(recommended.length).toBe(2); // 현준X 또는 현준Y
+    expect(r.candidates.map((c) => c.kind)).toEqual(['recommended', 'recommended', 'fullPlacement']);
+    for (const c of recommended) {
       expect(c.parties).toHaveLength(1);
       expect(friendSlots(c.parties[0]).map((s) => s.friendId).sort()).toEqual(['hj', 'yj']);
       expect(c.unplaced).toHaveLength(1);
@@ -230,7 +233,9 @@ describe('planRaid: 공대 규칙 (편성 수 · 친구 최소 인원)', () => {
   it('[바뀜] 서포터가 없으면 외부 서포터로 채운다: d(딜러 2) + e(딜러 1) → 공대 1개, d의 나머지 캐릭터는 못 간 캐릭터', () => {
     const r = planRaid({ raid: serkaHard, friends, clears, attendeeIds: ['d', 'e'] });
     expect(r.candidates.length).toBeGreaterThan(0);
-    for (const c of r.candidates) {
+    // 마지막 "모두 편성" 대안(기준 1, 공대 2개)은 빼고 본다
+    expect(r.candidates.at(-1)!.kind).toBe('fullPlacement');
+    for (const c of r.candidates.filter((x) => x.kind === 'recommended')) {
       expect(c.parties).toHaveLength(1);
       expect(c.parties[0].slots).toContainEqual({ kind: 'external', role: 'support' });
       expect(c.unplaced.map((u) => u.friendId)).toEqual(['d']);
@@ -354,7 +359,9 @@ describe('planRaid: 공대 규칙 (편성 수 · 친구 최소 인원)', () => {
     const r = planRaid({ raid: serkaHard, friends: dealers, clears: [], attendeeIds: ['w', 'x', 'y', 'z'] });
     expect(r.reason).toBeUndefined();
     expect(r.candidates.length).toBeGreaterThan(0);
-    for (const c of r.candidates) {
+    // 마지막 "모두 편성" 대안(기준 1, 공대 2개)은 빼고 본다
+    expect(r.candidates.at(-1)!.kind).toBe('fullPlacement');
+    for (const c of r.candidates.filter((x) => x.kind === 'recommended')) {
       expect(c.parties).toHaveLength(1);
       expect(c.parties[0].slots.filter((sl) => sl.kind === 'external')).toEqual([{ kind: 'external', role: 'support' }]);
       expect(c.summary.externalCount).toBe(1);
@@ -455,7 +462,12 @@ describe('planRaid: 친구로 꽉 찬 공대 우선 (설계 수정 C)', () => {
     expect(top.summary).toMatchObject({ friendThreshold: 3, characterCount: 13, partyCount: 4, externalCount: 3, externalSupports: 2, externalDealers: 1 });
     expect(top.unplaced).toHaveLength(2);
     expect([...chosenNames(top), ...unplacedNames(top)].sort()).toEqual(fs.flatMap((f) => f.characters.map((c) => c.name)).sort());
-    for (const c of r.candidates) for (const p of c.parties) expect(friendSlots(p).length).toBeGreaterThanOrEqual(3);
+    for (const c of r.candidates) {
+      // 추천은 공대마다 친구 3명 이상, 마지막 "모두 편성" 대안은 낮춘 기준(15개 모두 편성)
+      const t = c.kind === 'recommended' ? 3 : c.summary.friendThreshold;
+      for (const p of c.parties) expect(friendSlots(p).length).toBeGreaterThanOrEqual(t);
+    }
+    expect(r.candidates.at(-1)).toMatchObject({ kind: 'fullPlacement', unplaced: [], summary: { characterCount: 15 } });
     // 서포터는 모두 편성된다 (외부 서포터를 줄이는 것이 ③번 목표)
     expect(chosenNames(top)).toEqual(expect.arrayContaining(['m-3', 'f2-2']));
   });
@@ -491,6 +503,128 @@ describe('planRaid: 친구로 꽉 찬 공대 우선 (설계 수정 C)', () => {
   });
 });
 
+describe('planRaid: "모두 편성" 대안 (기준을 낮춰 더 많이 편성, 설계 수정 C 추가)', () => {
+  const recs = (r: PlanResult) => r.candidates.filter((c) => c.kind === 'recommended');
+  const alts = (r: PlanResult) => r.candidates.filter((c) => c.kind === 'fullPlacement');
+  // 리뷰 사례를 줄인 것: 8인, 친구 7명, 후보 17개 (캐릭터 수 4,4,3,2,2,1,1; 서포터 2).
+  // 기준 6: 공대 2개(친구마다 ≤ 2개 → 최대 12개), 기준 4: 공대 4개에 17개 모두.
+  const seven = makeFriends({
+    a: [['a1', 'dealer', 1735, 4100], ['a2', 'dealer', 1735, 3900], ['a3', 'support', 1735, 2500], ['a4', 'dealer', 1735, 3500]],
+    b: [['b1', 'dealer', 1735, 4000], ['b2', 'dealer', 1735, 3800], ['b3', 'dealer', 1735, 3600], ['b4', 'dealer', 1735, 3400]],
+    c: [['c1', 'dealer', 1735, 4200], ['c2', 'support', 1735, 2400], ['c3', 'dealer', 1735, 3300]],
+    d: [['d1', 'dealer', 1735, 3950], ['d2', 'dealer', 1735, 3700]],
+    e: [['e1', 'dealer', 1735, 3850], ['e2', 'dealer', 1735, 3650]],
+    f: [['f1', 'dealer', 1735, 4050]],
+    g: [['g1', 'dealer', 1735, 3750]],
+  });
+  const SEVEN = seven.map((f) => f.id);
+  const ALL17 = seven.flatMap((f) => f.characters.map((c) => c.name)).sort();
+
+  it('[리뷰 사례] 8인 · 친구 7명 · 후보 17개: 추천(기준 6)은 12개만, 마지막에 "모두 편성"(기준 4) 하나가 17개 모두 편성', () => {
+    expect(ALL17).toHaveLength(17);
+    const r = planRaid({ raid: kazerosHard, friends: seven, clears: [], attendeeIds: SEVEN });
+    expect(r.candidates.length).toBeLessThanOrEqual(3);
+    expect(alts(r)).toHaveLength(1);
+    const alt = r.candidates[r.candidates.length - 1];
+    expect(alt.kind).toBe('fullPlacement');
+    expect(recs(r).length).toBeGreaterThan(0);
+    expect(recs(r).length).toBeLessThanOrEqual(2);
+    const rec1 = r.candidates[0];
+    expect(rec1.kind).toBe('recommended');
+    for (const c of recs(r)) {
+      expect(c.summary).toMatchObject({ friendThreshold: 6, characterCount: 12, partyCount: 2, externalCount: 4 });
+      expect(c.unplaced).toHaveLength(5);
+      expect(c.summary.extraExternalVsBest).toBeUndefined();
+      expect(c.summary.extraPlacedVsBest).toBeUndefined();
+    }
+    expect(alt.summary).toMatchObject({
+      friendThreshold: 4, characterCount: 17, partyCount: 4, externalCount: 15,
+      extraExternalVsBest: 15 - 4, extraPlacedVsBest: 17 - 12,
+    });
+    expect(alt.summary.extraExternalVsBest).toBe(alt.summary.externalCount - rec1.summary.externalCount);
+    expect(alt.summary.extraPlacedVsBest).toBe(alt.summary.characterCount - rec1.summary.characterCount);
+    expect(alt.unplaced).toEqual([]);
+    expect(chosenNames(alt).sort()).toEqual(ALL17);
+    for (const p of alt.parties) {
+      expect(p.slots).toHaveLength(8);
+      const fsl = friendSlots(p);
+      expect(fsl.length).toBeGreaterThanOrEqual(4);
+      expect(new Set(fsl.map((s) => s.friendId)).size).toBe(fsl.length);
+      expect(p.slots.filter((s) => roleOf(s) === 'support')).toHaveLength(2);
+    }
+    // 같은 입력이면 같은 결과
+    expect(planRaid({ raid: kazerosHard, friends: seven, clears: [], attendeeIds: SEVEN })).toEqual(r);
+  });
+
+  it('추천이 이미 모두 편성하면 대안은 없다', () => {
+    for (const raid of [serkaHard, kazerosHard]) {
+      const r = planRaid({ raid, friends, clears, attendeeIds: ALL, limit: 5 });
+      expect(r.candidates.every((c) => c.unplaced.length === 0)).toBe(true);
+      expect(alts(r)).toEqual([]);
+      expect(r.candidates).toHaveLength(5);
+      expect(r.candidates.every((c) => c.kind === 'recommended')).toBe(true);
+    }
+  });
+
+  it('[헤드라인] 영준(1개) + 현준(2개), 4인: 추천은 2개 편성, 대안(기준 1)은 공대 2개로 3개 모두', () => {
+    const fs = makeFriends({
+      yj: [['영준A', 'dealer', 1735, 3800]],
+      hj: [['현준X', 'dealer', 1736, 3700], ['현준Y', 'dealer', 1735, 3000]],
+    });
+    const r = planRaid({ raid: serkaHard, friends: fs, clears: [], attendeeIds: ['yj', 'hj'] });
+    expect(r.candidates.map((c) => c.kind)).toEqual(['recommended', 'recommended', 'fullPlacement']);
+    const alt = r.candidates[2];
+    expect(alt.summary).toMatchObject({
+      friendThreshold: 1, characterCount: 3, partyCount: 2, externalCount: 5, extraExternalVsBest: 3, extraPlacedVsBest: 1,
+    });
+    expect(alt.unplaced).toEqual([]);
+  });
+
+  it('limit 1/2/3/5: 대안도 limit 안에 세고 항상 마지막, 나머지는 추천으로 채운다 (limit 1이면 대안 없음)', () => {
+    const all = planRaid({ raid: kazerosHard, friends: seven, clears: [], attendeeIds: SEVEN, limit: 1000 });
+    const available = recs(all).length;
+    expect(available).toBeGreaterThanOrEqual(4);
+    const alt0 = alts(all)[0];
+    let first: Candidate | undefined;
+    for (const limit of [1, 2, 3, 5]) {
+      const r = planRaid({ raid: kazerosHard, friends: seven, clears: [], attendeeIds: SEVEN, limit });
+      expect(r.candidates).toHaveLength(limit);
+      first ??= r.candidates[0];
+      expect(r.candidates[0]).toEqual(first);
+      if (limit === 1) {
+        expect(r.candidates[0].kind).toBe('recommended');
+        continue;
+      }
+      expect(r.candidates.map((c) => c.kind)).toEqual([...Array(limit - 1).fill('recommended'), 'fullPlacement']);
+      expect(r.candidates[limit - 1]).toEqual(alt0);
+    }
+  });
+
+  it('대안은 어떤 추천과도 같은 편성이 아니고, 추천보다 편성 수가 많다 (무작위 입력, 고정 시드)', () => {
+    const rand = rngFor(4242);
+    let withAlt = 0;
+    for (let n = 0; n < 150; n++) {
+      const raid = rand() < 0.5 ? serkaHard : kazerosHard;
+      const spec: Record<string, C[]> = {};
+      const fCount = 2 + Math.floor(rand() * 7);
+      for (let f = 0; f < fCount; f++) {
+        spec[`x${f}`] = Array.from({ length: 1 + Math.floor(rand() * 4) }, (_, j): C =>
+          [`x${f}-${j}`, rand() < 0.25 ? 'support' : 'dealer', 1735, 3000 + Math.round(rand() * 15) * 100]);
+      }
+      const fs = makeFriends(spec);
+      const r = planRaid({ raid, friends: fs, clears: [], attendeeIds: fs.map((f) => f.id), limit: 1 + Math.floor(rand() * 5) });
+      const a = alts(r);
+      expect(a.length).toBeLessThanOrEqual(1);
+      if (!a.length) continue;
+      withAlt++;
+      const recKeys = recs(r).map(groupingKey);
+      expect(recKeys).not.toContain(groupingKey(a[0]));
+      expect(a[0].summary.characterCount).toBeGreaterThan(r.candidates[0].summary.characterCount);
+    }
+    expect(withAlt).toBeGreaterThan(20);
+  });
+});
+
 // ---------- 무차별 대입 비교 / 무작위 규칙 검사 ----------
 
 function rngFor(seed: number) {
@@ -510,6 +644,13 @@ interface Best { t: number; placed: number; parties: number; extSupports: number
  * 기준 t(공대 하나라도 되는 가장 높은 값)와 ①②③(그다음 ④ 최악 단계)의 최적값을 구한다.
  */
 function bruteForce(fs: Friend[], raid: RaidConfig): Best | null {
+  const best = bruteForceLevels(fs, raid);
+  for (const t of best.keys()) return best.get(t)!; // 가장 높은 기준부터 들어 있다
+  return null;
+}
+
+/** 기준 t마다 (공대 하나라도 되는 t만) ①②③④ 최적값. 키 순서는 높은 기준부터. */
+function bruteForceLevels(fs: Friend[], raid: RaidConfig): Map<number, Best> {
   const items = fs.flatMap((f) => f.characters.map((c) => ({ f: f.id, sup: c.role === 'support', cp: c.combatPower })));
   const ss = raid.size / 4;
   const ds = raid.size - ss;
@@ -550,8 +691,7 @@ function bruteForce(fs: Friend[], raid: RaidConfig): Best | null {
     groups.pop();
   };
   walk(0);
-  for (const t of levels) if (best.has(t)) return best.get(t)!;
-  return null;
+  return new Map(levels.filter((t) => best.has(t)).map((t) => [t, best.get(t)!]));
 }
 
 describe('planRaid: 작은 입력은 무차별 대입 최적과 같다 (①②③)', () => {
@@ -586,6 +726,50 @@ describe('planRaid: 작은 입력은 무차별 대입 최적과 같다 (①②�
     expect(checked).toBe(300);
     expect(worstOptimal / checked).toBeGreaterThan(0.97);
   });
+
+  it('"모두 편성" 대안: 캐릭터 ≤ 8, 4인/8인, 고정 시드 300개: 어느 기준으로든 가능한 최대 편성 수를 편성하고, 그 수가 1순위보다 많을 때만 나온다', () => {
+    const rand = rngFor(1016);
+    let present = 0;
+    let absent = 0;
+    for (let n = 0; n < 300; n++) {
+      const raid = rand() < 0.5 ? serkaHard : kazerosHard;
+      const friendCount = 1 + Math.floor(rand() * 5);
+      const spec: Record<string, C[]> = {};
+      let total = 0;
+      for (let f = 0; f < friendCount && total < 8; f++) {
+        const k = Math.min(1 + Math.floor(rand() * 4), 8 - total);
+        total += k;
+        spec[`r${f}`] = Array.from({ length: k }, (_, j): C => {
+          const support = rand() < 0.3;
+          const cp = rand() < 0.1 ? null : 2800 + Math.round(rand() * 18) * 100;
+          return [`r${f}-${j}`, support ? 'support' : 'dealer', 1735, cp];
+        });
+      }
+      const fs = makeFriends(spec);
+      const levels = bruteForceLevels(fs, raid);
+      const maxPlaced = Math.max(...[...levels.values()].map((b) => b.placed));
+      const r = planRaid({ raid, friends: fs, clears: [], attendeeIds: fs.map((f) => f.id) });
+      const rec1 = r.candidates[0];
+      const alt = r.candidates.filter((c) => c.kind === 'fullPlacement');
+      if (maxPlaced <= rec1.summary.characterCount) {
+        absent++;
+        expect({ case: n, alt: alt.length }).toEqual({ case: n, alt: 0 });
+        continue;
+      }
+      present++;
+      expect({ case: n, alt: alt.length, last: r.candidates[r.candidates.length - 1].kind }).toEqual({ case: n, alt: 1, last: 'fullPlacement' });
+      // 그 편성 수를 이루는 가장 높은 기준, 그 기준에서의 ②③ 최적
+      const level = [...levels.keys()].find((t) => levels.get(t)!.placed === maxPlaced)!;
+      const b = levels.get(level)!;
+      const s = alt[0].summary;
+      expect({ case: n, t: s.friendThreshold, placed: s.characterCount, parties: s.partyCount, extSupports: s.externalSupports })
+        .toEqual({ case: n, t: level, placed: maxPlaced, parties: b.parties, extSupports: b.extSupports });
+      expect(s.extraPlacedVsBest).toBe(maxPlaced - rec1.summary.characterCount);
+      expect(s.extraExternalVsBest).toBe(s.externalCount - rec1.summary.externalCount);
+    }
+    expect(present).toBeGreaterThan(30);
+    expect(absent).toBeGreaterThan(30);
+  });
 });
 
 describe('planRaid: 무작위 입력의 규칙 검사 (가는 난이도 · 클리어 · 숙련도 무작위, 고정 시드)', () => {
@@ -597,6 +781,7 @@ describe('planRaid: 무작위 입력의 규칙 검사 (가는 난이도 · 클�
     let nonEmpty = 0;
     let relaxed = 0;
     let withUnplaced = 0;
+    let withAlt = 0;
     for (let n = 0; n < 400; n++) {
       const raid = pick(RAIDS);
       const fCount = 1 + Math.floor(rand() * 8);
@@ -655,12 +840,29 @@ describe('planRaid: 무작위 입력의 규칙 검사 (가는 난이도 · 클�
       const ss = raid.size / 4;
       const t0 = r.candidates[0].summary.friendThreshold;
       if (t0 < Math.ceil(raid.size * 0.75)) relaxed++;
+      // "모두 편성" 대안: 최대 1개, 항상 마지막, limit 1이면 없음, 1순위보다 더 많이 편성, 기준은 1순위 이하
+      const kinds = r.candidates.map((c) => c.kind);
+      const altIdx = kinds.indexOf('fullPlacement');
+      expect(kinds.filter((k) => k === 'fullPlacement').length).toBeLessThanOrEqual(1);
+      expect(kinds.every((k) => k === 'recommended' || k === 'fullPlacement')).toBe(true);
+      expect(kinds[0]).toBe('recommended');
+      if (altIdx >= 0) {
+        withAlt++;
+        expect(altIdx).toBe(r.candidates.length - 1);
+        expect(limit).toBeGreaterThanOrEqual(2);
+        const alt = r.candidates[altIdx];
+        expect(alt.summary.characterCount).toBeGreaterThan(r.candidates[0].summary.characterCount);
+        expect(alt.summary.friendThreshold).toBeLessThanOrEqual(t0);
+        expect(r.candidates.slice(0, altIdx).map(groupingKey)).not.toContain(groupingKey(alt));
+      }
       for (const c of r.candidates) {
         const placed = chosenNames(c);
+        const isAlt = c.kind === 'fullPlacement';
+        const tc = c.summary.friendThreshold;
         if (c.unplaced.length) withUnplaced++;
         expect([...placed, ...unplacedNames(c)].sort()).toEqual([...pool.keys()].sort());
         for (const u of c.unplaced) expect(u.friendId).toBe(pool.get(u.characterName));
-        expect(c.summary.friendThreshold).toBe(t0);
+        if (!isAlt) expect(tc).toBe(t0);
         for (const p of c.parties) {
           const fsl = friendSlots(p);
           expect(p.slots).toHaveLength(raid.size);
@@ -669,7 +871,7 @@ describe('planRaid: 무작위 입력의 규칙 검사 (가는 난이도 · 클�
           expect(fsl.filter((s) => s.character.role === 'support').length).toBeLessThanOrEqual(ss);
           expect(fsl.filter((s) => s.character.role === 'dealer').length).toBeLessThanOrEqual(raid.size - ss);
           expect(p.slots.filter((s) => roleOf(s) === 'support')).toHaveLength(ss);
-          expect(fsl.length).toBeGreaterThanOrEqual(t0);
+          expect(fsl.length).toBeGreaterThanOrEqual(tc);
           for (const s of fsl) expect(s.proficiency).toBe(profs[s.character.name] ?? '반숙');
           const cps = fsl.flatMap((s) => (s.character.role === 'dealer' && s.character.combatPower !== null ? [s.character.combatPower] : []));
           expect(p.dealerAvgCP).toBe(cps.length ? cps.reduce((a, b) => a + b, 0) / cps.length : null);
@@ -679,9 +881,14 @@ describe('planRaid: 무작위 입력의 규칙 검사 (가는 난이도 · 클�
           friendCount: new Set(c.parties.flatMap((p) => friendSlots(p).map((s) => s.friendId))).size,
           characterCount: placed.length, partyCount: c.parties.length,
           externalCount: extTotal(c), externalSupports: extSupports(c), externalDealers: extTotal(c) - extSupports(c),
-          friendThreshold: t0,
+          friendThreshold: tc,
+          ...(isAlt ? {
+            extraExternalVsBest: extTotal(c) - r.candidates[0].summary.externalCount,
+            extraPlacedVsBest: placed.length - r.candidates[0].summary.characterCount,
+          } : {}),
         });
-        // ①②③은 1순위가 가장 좋다
+        if (isAlt) continue;
+        // ①②③은 1순위가 가장 좋다 (추천끼리)
         const top = r.candidates[0];
         const k = (x: Candidate) => [-x.summary.characterCount, x.summary.externalCount, x.summary.externalSupports];
         const [a, b] = [k(top), k(c)];
@@ -709,6 +916,7 @@ describe('planRaid: 무작위 입력의 규칙 검사 (가는 난이도 · 클�
     expect(nonEmpty).toBeGreaterThan(150);
     expect(relaxed).toBeGreaterThan(10);
     expect(withUnplaced).toBeGreaterThan(10);
+    expect(withAlt).toBeGreaterThan(10);
   });
 });
 
@@ -844,6 +1052,31 @@ describe('planRaid: 성능', () => {
         if (experts >= parties) expect(r.candidates[0].parties.every((p) => !p.proficiency!.noExpert)).toBe(true);
       }
     }
+  });
+
+  it('"모두 편성" 대안을 같이 찾는 입력도 8명은 1초, 16명은 3초 안 (캐릭터 많은 친구 + 캐릭터 1개 친구)', () => {
+    const lopsided = (many: number, few: number): Friend[] => makeFriends(Object.fromEntries([
+      ...Array.from({ length: many }, (_, f) => [`m${f}`, Array.from({ length: 6 }, (_, k): C =>
+        [`m${f}-${k}`, k % 3 === 2 ? 'support' : 'dealer', 1735, 2900 + ((f * 41 + k * 59) % 16) * 90])]),
+      ...Array.from({ length: few }, (_, f) => [`o${f}`, [[`o${f}-0`, f % 4 === 0 ? 'support' : 'dealer', 1735, 3000 + ((f * 23) % 12) * 100] as C]]),
+    ]));
+    const times: string[] = [];
+    for (const [many, few, limitMs] of [[2, 6, 1000], [2, 1, 1000], [4, 4, 1000], [5, 1, 1000], [5, 3, 1000], [4, 12, 3000], [8, 8, 3000], [10, 6, 3000], [15, 1, 3000]] as const) {
+      const fs = lopsided(many, few);
+      for (const raid of [serkaHard, kazerosHard]) {
+        const t0 = performance.now();
+        const r = planRaid({ raid, friends: fs, clears: [], attendeeIds: fs.map((f) => f.id) });
+        const ms = performance.now() - t0;
+        expect(ms).toBeLessThan(limitMs);
+        const alt = r.candidates.find((c) => c.kind === 'fullPlacement');
+        if (alt) {
+          expect(alt.summary.characterCount).toBeGreaterThan(r.candidates[0].summary.characterCount);
+          expect(r.candidates.at(-1)).toBe(alt);
+        }
+        times.push(`${many}x6+${few}x1 ${raid.size}인 ${ms.toFixed(0)}ms(${r.candidates[0].summary.characterCount}${alt ? `→대안 ${alt.summary.characterCount}` : ', 대안 없음'})`);
+      }
+    }
+    console.log(`[성능] 대안: ${times.join(', ')}`);
   });
 
   it('딜러만 8명 x 6캐릭터, 8인 레이드도 1초 안 (공대 8개, 모두 편성)', () => {

@@ -39,15 +39,29 @@ export interface PlanSummary {
   friendCount: number; characterCount: number; partyCount: number;
   externalCount: number; externalSupports: number; externalDealers: number;
   friendThreshold: number;
+  /**
+   * "모두 편성" 대안(kind === 'fullPlacement')에만 있는 비교 값 (첫 번째 추천과의 차이; 추천에는 없다):
+   * extraExternalVsBest = 이 후보의 외부 인원 총수 − 첫 번째 추천의 외부 인원 총수 (화면: "추천보다 외부 N명 더 필요"),
+   * extraPlacedVsBest = 이 후보의 편성된 캐릭터 수 − 첫 번째 추천의 편성된 캐릭터 수 (항상 1 이상).
+   */
+  extraExternalVsBest?: number;
+  extraPlacedVsBest?: number;
 }
 /** 이번 추천에서 편성되지 못한 후보 캐릭터. */
 export interface UnplacedCharacter { friendId: string; characterName: string; }
+/**
+ * 후보의 종류: 'recommended' = 친구로 꽉 찬 공대 우선 추천 (기준 t 엄격), 'fullPlacement' = "모두 편성" 대안
+ * (기준 t를 낮춰 더 많은 캐릭터를 편성한 것; 추천보다 캐릭터를 더 많이 편성할 때만, 결과마다 최대 1개, 항상 마지막).
+ */
+export type CandidateKind = 'recommended' | 'fullPlacement';
 /**
  * 추천 하나 = 완성된 편성 (공대 전부). 같은 친구가 다른 공대에 다른 캐릭터로 들어갈 수 있고
  * (한 공대에는 한 번만), 같은 캐릭터는 추천 안에서 한 번만 나온다. imbalance = 공대별 딜러 평균의 최댓값-최솟값.
  * unplaced = 후보였지만 이 추천에서 편성되지 않은 캐릭터 (참석자 순서, 원정대 순서).
  */
-export interface Candidate { parties: Party[]; summary: PlanSummary; imbalance: number; unplaced: UnplacedCharacter[]; }
+export interface Candidate {
+  kind: CandidateKind; parties: Party[]; summary: PlanSummary; imbalance: number; unplaced: UnplacedCharacter[];
+}
 /**
  * proficiencyTracked: 이 편성의 대상 캐릭터 중 하나라도 이 레이드 숙련도를 직접 정해 두었는가 (반숙 포함).
  * false(또는 없음)면 모두 기본값이라 "숙련자 없음" 경고와 기본 반숙 배지를 보여 주지 않는다. 대상이 없으면 생략.

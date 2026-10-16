@@ -1,7 +1,7 @@
 import { eligibleCharacters } from './eligibility';
 import { DEFAULT_PROFICIENCY, summarizeProficiency } from './proficiency';
 import type {
-  Candidate, Character, ClearRecord, Friend, Party, PlanResult, PlanSummary, Proficiency, RaidConfig, Slot, Tier, UnplacedCharacter,
+  Candidate, CandidateKind, Character, ClearRecord, Friend, Party, PlanResult, PlanSummary, Proficiency, RaidConfig, Slot, Tier, UnplacedCharacter,
 } from './types';
 
 /**
@@ -22,6 +22,10 @@ import type {
  * ④~⑦은 결정적 휴리스틱: 여러 번(고정 시드) 캐릭터 선택 + 간선 칠하기로 초기 배정 → 교환/이동(못 간 캐릭터와의 교환 포함)
  * 국소 개선 → 이웃 배정까지 모아 중복(공대 순서만 다른 것)을 빼고 순위대로 상위 limit개.
  * 숙련도 점수 차는 공대별 (숙련 +1, 반숙 0, 클경 -1) 합의 최대-최소. 외부 자리는 평균/숙련도 계산에서 빠진다.
+ *
+ * "모두 편성" 대안 (kind 'fullPlacement'): 같은 후보로 기준을 같은 사다리(3/4 → 1/2 → 1)로 낮춰 가며 편성 수가 가장 큰
+ * 기준(같으면 더 높은 기준)을 고르고, 그 기준에서 같은 ①~⑦로 1순위 하나를 구한다. 추천의 1순위보다 편성 수가 많을 때만
+ * 결과의 맨 끝에 붙이고 limit 자리 하나를 쓴다 (limit 1이면 붙이지 않는다).
  */
 
 /** 권장 최소 전투력의 이 비율 이상이면 'tight', 미만이면 'risky'. 조정 가능한 상수. */
@@ -112,14 +116,39 @@ function maxPlaced(c: Counts, P: number, supCap: number, dealCap: number): numbe
 
 interface Target { t: number; P: number; N: number; supports: number; }
 
-/** 기준 t, 공대 수 P, 편성 수 N, 편성할 서포터 수를 정한다 (①②③ 최적). */
+/** 공대 하나라도 t명 이상으로 만들 수 있는 기준들 (높은 것부터). 첫 번째가 추천의 기준 t. */
+function feasibleThresholds(c: Counts, size: number): number[] {
+  const s = size / 4;
+  // 공대 P개 평균이 t 이상이면 그중 하나는 t 이상이므로 P=1만 보면 된다
+  const single = maxPlaced(c, 1, s, size - s);
+  return friendThresholds(size).filter((x) => single >= x);
+}
+
+/** 기준 t(추천에 쓰는 가장 높은 기준), 공대 수 P, 편성 수 N, 편성할 서포터 수를 정한다 (①②③ 최적). */
 function chooseTarget(c: Counts, size: number): Target | null {
+  const t = feasibleThresholds(c, size)[0];
+  return t === undefined ? null : targetAt(c, size, t);
+}
+
+/**
+ * "모두 편성" 대안의 목표: 가능한 기준(높은 것부터) 중 편성 수 N이 가장 큰 것, 같으면 더 높은 기준(외부 인원이 적다).
+ * 그 기준 안에서는 추천과 같은 ①②③ (targetAt). 기준이 낮을수록 N은 줄지 않으므로 마지막 기준(1)의 N이 최댓값이다.
+ */
+function chooseFullTarget(c: Counts, size: number): Target | null {
+  let best: Target | null = null;
+  for (const t of feasibleThresholds(c, size)) {
+    const x = targetAt(c, size, t);
+    if (x && (!best || x.N > best.N)) best = x;
+  }
+  return best;
+}
+
+/** 기준 t를 정했을 때의 공대 수 P, 편성 수 N, 서포터 수 (①②③ 최적). */
+function targetAt(c: Counts, size: number, t: number): Target | null {
   const s = size / 4;
   const d = size - s;
   const n = c.sup.reduce((x, y) => x + y, 0) + c.deal.reduce((x, y) => x + y, 0);
   if (n === 0) return null;
-  // 공대 하나라도 t명 이상으로 만들 수 있는 가장 높은 t. (공대 P개 평균이 t 이상이면 그중 하나는 t 이상이므로 P=1만 보면 된다)
-  const t = friendThresholds(size).find((x) => maxPlaced(c, 1, s, d) >= x)!;
   let best: Target | null = null;
   for (let P = 1; P * t <= n; P++) {
     const N = maxPlaced(c, P, P * s, P * d);
@@ -631,7 +660,7 @@ function search(ctx: Ctx, counts: Counts, target: Target, byFriend: number[][]):
 }
 
 /** 배정 → 화면용 Candidate. 공대 순서: 친구 많은 공대 → 딜러 평균 높은 공대 → 이름순. */
-function toCandidate(f: Found): Candidate {
+function toCandidate(f: Found, kind: CandidateKind = 'recommended'): Candidate {
   const L = f.layout;
   const { items, P, raid, supportSlots, t, bench } = L.ctx;
   const parties: (Party & { key: string; friends: number })[] = [];
@@ -659,7 +688,7 @@ function toCandidate(f: Found): Candidate {
   const imbalance = avgs.length ? Math.max(...avgs) - Math.min(...avgs) : 0;
   const unplaced: UnplacedCharacter[] = items.flatMap((it, i) =>
     (L.assign[i] === bench ? [{ friendId: it.friendId, characterName: it.character.name }] : []));
-  return { parties: clean, summary: summarize(clean, t), imbalance, unplaced };
+  return { kind, parties: clean, summary: summarize(clean, t), imbalance, unplaced };
 }
 
 /** 공대 목록의 요약. friendThreshold는 그 추천에 쓴 친구 최소 인원 t. */
@@ -737,24 +766,42 @@ export function planRaid(input: {
   };
   const target = chooseTarget(counts, raid.size);
   if (!target) return { candidates: [], excluded, reason: NO_LAYOUT_REASON, proficiencyTracked };
-  const ctx: Ctx = {
-    raid, items, P: target.P, F: byFriend.length, t: target.t, supportSlots, dealerSlots, bench: target.P,
+  const rankedAt = (tg: Target): Found[] => {
+    const ctx: Ctx = { raid, items, P: tg.P, F: byFriend.length, t: tg.t, supportSlots, dealerSlots, bench: tg.P };
+    return search(ctx, counts, tg, byFriend)
+      .sort((a, b) => compareScore(a.score, b.score) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   };
-  const found = search(ctx, counts, target, byFriend);
-  if (found.length === 0) return { candidates: [], excluded, reason: NO_LAYOUT_REASON, proficiencyTracked };
-  const ranked = found.sort((a, b) => compareScore(a.score, b.score) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  const ranked = rankedAt(target);
+  if (ranked.length === 0) return { candidates: [], excluded, reason: NO_LAYOUT_REASON, proficiencyTracked };
+
+  // "모두 편성" 대안: 기준을 낮춰 추천보다 캐릭터를 더 많이 편성할 수 있을 때만, 자리(limit) 하나를 써서 맨 끝에 하나.
+  // 추천의 편성 수 N은 모든 추천이 같으므로 대안은 어떤 추천과도 같은 편성이 아니다.
+  let full: Found | undefined;
+  if (limit >= 2) {
+    const fullTarget = chooseFullTarget(counts, raid.size);
+    if (fullTarget && fullTarget.N > target.N) full = rankedAt(fullTarget)[0];
+  }
+  const recLimit = full ? limit - 1 : limit;
+
   // 딜러 배치가 다른 추천을 먼저 고르고(서포터 자리만 바꾼 비슷한 추천이 위를 다 차지하지 않게), 남은 자리는 순위대로.
   const chosen = new Set<Found>();
   const dealerKeys = new Set<string>();
   for (const f of ranked) {
-    if (chosen.size >= limit) break;
+    if (chosen.size >= recLimit) break;
     const dk = f.layout.dealerKey();
     if (!dealerKeys.has(dk)) { dealerKeys.add(dk); chosen.add(f); }
   }
   for (const f of ranked) {
-    if (chosen.size >= limit) break;
+    if (chosen.size >= recLimit) break;
     chosen.add(f);
   }
-  const picked = ranked.filter((f) => chosen.has(f));
-  return { candidates: picked.map(toCandidate), excluded, proficiencyTracked };
+  const candidates = ranked.filter((f) => chosen.has(f)).map((f) => toCandidate(f));
+  if (full && candidates.length) {
+    const alt = toCandidate(full, 'fullPlacement');
+    const best = candidates[0].summary;
+    alt.summary.extraExternalVsBest = alt.summary.externalCount - best.externalCount;
+    alt.summary.extraPlacedVsBest = alt.summary.characterCount - best.characterCount;
+    candidates.push(alt);
+  }
+  return { candidates, excluded, proficiencyTracked };
 }
