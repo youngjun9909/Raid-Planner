@@ -1,5 +1,6 @@
 import { Redis } from '@upstash/redis';
 import type { ClearRecord, Friend } from '@/core/types';
+import { isProduction } from '@/lib/env';
 
 export interface Store {
   listFriends(): Promise<Friend[]>;
@@ -121,12 +122,39 @@ export function createUpstashStore(redis: Redis): Store {
   };
 }
 
+export const STORE_CONFIG_MESSAGE =
+  '저장소(Upstash Redis) 환경변수가 설정되지 않았어요. UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN 을 확인해 주세요';
+
+/** 배포 환경에서 저장소 env가 없을 때. 메시지는 고정 문구라 비밀 값이 섞이지 않는다. */
+export class StoreConfigError extends Error {
+  constructor() {
+    super(STORE_CONFIG_MESSAGE);
+    this.name = 'StoreConfigError';
+  }
+}
+
+/** UPSTASH_REDIS_REST_* 를 먼저 보고, 없으면 Vercel Marketplace가 넣는 KV_REST_API_* 를 쓴다. 두 쌍을 섞지 않는다. */
+function redisEnv(): { url: string; token: string } | undefined {
+  const pairs: [string | undefined, string | undefined][] = [
+    [process.env.UPSTASH_REDIS_REST_URL, process.env.UPSTASH_REDIS_REST_TOKEN],
+    [process.env.KV_REST_API_URL, process.env.KV_REST_API_TOKEN],
+  ];
+  for (const [url, token] of pairs) if (url && token) return { url, token };
+  return undefined;
+}
+
 let singleton: Store | undefined;
+/**
+ * Upstash 설정이 있으면 Upstash, 없으면 로컬 개발/테스트용 메모리 저장소.
+ * 배포 환경(VERCEL 또는 NODE_ENV=production)에서 설정이 없으면 StoreConfigError를 던진다:
+ * 인스턴스마다 메모리가 따로라 데이터가 사라지고 웹/디스코드가 서로 다른 값을 보게 되기 때문.
+ */
 export function getStore(): Store {
   if (!singleton) {
-    const url = process.env.UPSTASH_REDIS_REST_URL;
-    const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-    singleton = url && token ? createUpstashStore(new Redis({ url, token })) : createMemoryStore();
+    const env = redisEnv();
+    if (env) singleton = createUpstashStore(new Redis(env));
+    else if (isProduction()) throw new StoreConfigError();
+    else singleton = createMemoryStore();
   }
   return singleton;
 }

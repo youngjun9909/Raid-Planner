@@ -148,11 +148,60 @@ describe('memory store copies', () => {
 
 describe('getStore', () => {
   const saved = { u: process.env.UPSTASH_REDIS_REST_URL, t: process.env.UPSTASH_REDIS_REST_TOKEN };
+  beforeEach(() => {
+    // 실행 환경에 어떤 값이 있든 매트릭스를 명확히: 기본은 "로컬 개발, 저장소 env 없음"
+    vi.stubEnv('UPSTASH_REDIS_REST_URL', '');
+    vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', '');
+    vi.stubEnv('KV_REST_API_URL', '');
+    vi.stubEnv('KV_REST_API_TOKEN', '');
+    vi.stubEnv('VERCEL', '');
+    vi.stubEnv('NODE_ENV', 'test');
+  });
   afterEach(() => {
+    vi.unstubAllEnvs();
     if (saved.u === undefined) delete process.env.UPSTASH_REDIS_REST_URL; else process.env.UPSTASH_REDIS_REST_URL = saved.u;
     if (saved.t === undefined) delete process.env.UPSTASH_REDIS_REST_TOKEN; else process.env.UPSTASH_REDIS_REST_TOKEN = saved.t;
     vi.doUnmock('@upstash/redis');
     vi.resetModules();
+  });
+  const fresh = async () => {
+    const ctor = vi.fn();
+    vi.resetModules();
+    vi.doMock('@upstash/redis', () => ({ Redis: ctor }));
+    return { ctor, m: await import('@/store/store') };
+  };
+
+  it('UPSTASH 이름이 없으면 KV_REST_API_URL/TOKEN(Vercel Marketplace)을 쓴다', async () => {
+    vi.stubEnv('KV_REST_API_URL', 'https://kv.example.invalid'); vi.stubEnv('KV_REST_API_TOKEN', 'kvtok');
+    vi.stubEnv('VERCEL', '1');
+    const { ctor, m } = await fresh();
+    m.getStore();
+    expect(ctor).toHaveBeenCalledWith({ url: 'https://kv.example.invalid', token: 'kvtok' });
+  });
+
+  it('두 이름이 다 있으면 UPSTASH_REDIS_REST_* 가 우선', async () => {
+    vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://u.example.invalid'); vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'utok');
+    vi.stubEnv('KV_REST_API_URL', 'https://kv.example.invalid'); vi.stubEnv('KV_REST_API_TOKEN', 'kvtok');
+    const { ctor, m } = await fresh();
+    m.getStore();
+    expect(ctor).toHaveBeenCalledWith({ url: 'https://u.example.invalid', token: 'utok' });
+  });
+
+  it.each([
+    ['VERCEL=1', { VERCEL: '1' }],
+    ['NODE_ENV=production', { NODE_ENV: 'production' }],
+  ])('저장소 env가 없고 %s 이면 한글 안내와 함께 throw (메모리로 조용히 넘어가지 않는다)', async (_n, env) => {
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
+    const { ctor, m } = await fresh();
+    expect(() => m.getStore()).toThrow(m.StoreConfigError);
+    expect(() => m.getStore()).toThrow('저장소(Upstash Redis) 환경변수가 설정되지 않았어요. UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN 을 확인해 주세요');
+    expect(ctor).not.toHaveBeenCalled();
+  });
+
+  it('URL만 있고 토큰이 없으면 설정이 없는 것으로 본다 (프로덕션이면 throw)', async () => {
+    vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://u.example.invalid'); vi.stubEnv('VERCEL', '1');
+    const { m } = await fresh();
+    expect(() => m.getStore()).toThrow(m.StoreConfigError);
   });
 
   it('env가 없으면 메모리 저장소이고 같은 인스턴스를 돌려준다', async () => {

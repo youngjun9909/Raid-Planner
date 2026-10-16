@@ -1,10 +1,10 @@
 import { getStore } from '@/store/store';
 import { fetchRoster } from '@/lostark/client';
-import { errorResponse, guard, lostArkErrorResponse } from '@/lib/http';
+import { errorResponse, guard, lostArkErrorResponse, withConfigErrors } from '@/lib/http';
 
 export const maxDuration = 60;
 
-export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
+export const POST = withConfigErrors(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
   const denied = guard(req);
   if (denied) return denied;
   const { id } = await ctx.params;
@@ -19,4 +19,4 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   } catch (err) {
     return lostArkErrorResponse(err);
   }
-}
+});

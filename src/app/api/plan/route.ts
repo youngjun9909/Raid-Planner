@@ -2,9 +2,9 @@ import { getStore } from '@/store/store';
 import { getRaid } from '@/core/raids';
 import { planRaid } from '@/core/planner';
 import { weekKey } from '@/core/week';
-import { badRequest, guard, readJson } from '@/lib/http';
+import { badRequest, guard, readJson, withConfigErrors } from '@/lib/http';
 
-export async function POST(req: Request) {
+export const POST = withConfigErrors(async (req: Request) => {
   const denied = guard(req);
   if (denied) return denied;
   const body = await readJson(req);
@@ -17,4 +17,4 @@ export async function POST(req: Request) {
   const [friends, clears] = await Promise.all([store.listFriends(), store.getClears(weekKey(new Date()))]);
   const result = planRaid({ raid, friends, clears, attendeeIds: body.attendeeIds as string[] });
   return Response.json({ ...result, raid });
-}
+});

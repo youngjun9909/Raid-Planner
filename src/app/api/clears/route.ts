@@ -1,15 +1,15 @@
 import { getStore } from '@/store/store';
 import { RAIDS } from '@/core/raids';
 import { weekKey } from '@/core/week';
-import { badRequest, guard, isNonEmptyString, readJson } from '@/lib/http';
+import { badRequest, guard, isNonEmptyString, readJson, withConfigErrors } from '@/lib/http';
 
-export async function GET(req: Request) {
+export const GET = withConfigErrors(async (req: Request) => {
   const denied = guard(req);
   if (denied) return denied;
   return Response.json(await getStore().getClears(weekKey(new Date())));
-}
+});
 
-export async function PUT(req: Request) {
+export const PUT = withConfigErrors(async (req: Request) => {
   const denied = guard(req);
   if (denied) return denied;
   const body = await readJson(req);
@@ -29,4 +29,4 @@ export async function PUT(req: Request) {
   }
   await getStore().setCharacterClears(weekKey(new Date()), body.characterName, records);
   return Response.json({ ok: true });
-}
+});

@@ -1,7 +1,23 @@
 import { checkPassword } from '@/lib/auth';
 import { LostArkError } from '@/lostark/client';
+import { StoreConfigError } from '@/store/store';
 
 export const errorResponse = (error: string, status: number) => Response.json({ error }, { status });
+
+/**
+ * 라우트 핸들러를 감싸 설정 오류(저장소 env 누락)를 503 한글 JSON으로 바꾼다.
+ * 그 밖의 예외는 그대로 던진다(Next가 500으로 처리).
+ */
+export function withConfigErrors<A extends unknown[]>(fn: (...args: A) => Promise<Response>) {
+  return async (...args: A): Promise<Response> => {
+    try {
+      return await fn(...args);
+    } catch (err) {
+      if (err instanceof StoreConfigError) return errorResponse(err.message, 503);
+      throw err;
+    }
+  };
+}
 
 export const unauthorized = () => errorResponse('비밀번호가 올바르지 않아요', 401);
 

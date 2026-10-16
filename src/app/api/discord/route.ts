@@ -1,9 +1,9 @@
 import { after } from 'next/server';
 import { verifyKey } from 'discord-interactions';
-import { getStore } from '@/store/store';
+import { getStore, StoreConfigError, type Store } from '@/store/store';
 import { fetchRoster } from '@/lostark/client';
 import { handleInteraction } from '@/discord/handler';
-import type { DiscordInteraction } from '@/discord/types';
+import { EPHEMERAL, InteractionType, ResponseType, type DiscordInteraction } from '@/discord/types';
 
 export const maxDuration = 60;
 
@@ -23,7 +23,16 @@ export async function POST(req: Request) {
   } catch {
     return new Response('bad request', { status: 400 });
   }
-  const { response, after: work } = await handleInteraction(body, { store: getStore(), fetchRoster, now: () => new Date() });
+  let store: Store;
+  try {
+    store = getStore();
+  } catch (err) {
+    if (!(err instanceof StoreConfigError)) throw err;
+    // PING은 저장소 없이 답할 수 있다. 나머지는 실행한 사람에게만 설정 안내를 보여 준다.
+    if (body?.type === InteractionType.PING) return Response.json({ type: ResponseType.PONG });
+    return Response.json({ type: ResponseType.CHANNEL_MESSAGE, data: { content: `⚠️ ${err.message}`, flags: EPHEMERAL } });
+  }
+  const { response, after: work } = await handleInteraction(body, { store, fetchRoster, now: () => new Date() });
   if (work) after(work);
   return Response.json(response);
 }

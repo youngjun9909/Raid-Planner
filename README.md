@@ -43,6 +43,10 @@
    - REST URL → `UPSTASH_REDIS_REST_URL`
    - REST TOKEN → `UPSTASH_REDIS_REST_TOKEN`
 
+Vercel의 **Storage / Marketplace** 메뉴에서 Upstash를 연결하면 이름이 `KV_REST_API_URL` / `KV_REST_API_TOKEN` 으로 자동으로 들어가기도 해요. 이 앱은 두 이름을 모두 알아들어요(`UPSTASH_REDIS_REST_*` 가 있으면 그것을 먼저 써요). URL과 토큰은 같은 쌍에서 와야 해요.
+
+배포 환경(Vercel)에서 둘 다 없으면 앱이 데이터를 잃지 않도록 **저장소를 쓰는 모든 요청을 거부하고** "저장소(Upstash Redis) 환경변수가 설정되지 않았어요…" 안내를 보여 줘요. 이 안내가 보이면 환경변수를 넣고 다시 배포하세요.
+
 ## 4. Vercel 배포
 
 1. 이 폴더를 GitHub 저장소로 올려요 (또는 `npm i -g vercel` 후 `vercel` 명령으로 바로 배포해도 돼요).
@@ -55,8 +59,8 @@
 | `DISCORD_PUBLIC_KEY` | 디스코드 사용 시 필수 | 디스코드 요청의 서명을 확인해요. 없으면 모든 디스코드 요청을 거부해요 |
 | `DISCORD_APP_ID` | 명령어 등록 시 필수 | 디스코드 앱 ID (명령어 등록 스크립트가 써요) |
 | `DISCORD_BOT_TOKEN` | 명령어 등록 시 필수 | 봇 토큰 (명령어 등록 스크립트가 써요) |
-| `UPSTASH_REDIS_REST_URL` | 필수 | 저장소 주소. 비우면 임시 메모리를 써서 데이터가 금방 사라져요 |
-| `UPSTASH_REDIS_REST_TOKEN` | 필수 | 저장소 토큰 |
+| `UPSTASH_REDIS_REST_URL` | 필수 | 저장소 주소 (또는 `KV_REST_API_URL`). 배포 환경에서 없으면 저장소를 쓰는 요청이 503 안내로 거부돼요 |
+| `UPSTASH_REDIS_REST_TOKEN` | 필수 | 저장소 토큰 (또는 `KV_REST_API_TOKEN`) |
 | `APP_PASSWORD` | 강력 추천 | 웹 화면 비밀번호. 비우면 주소를 아는 누구나 쓸 수 있어요 |
 | `CRON_SECRET` | 필수 | 주간 자동 작업 인증. 비우면 크론이 거부돼요 |
 
@@ -128,7 +132,7 @@ npm run dev     # http://localhost:3000
 npm test        # 자동 테스트 (인터넷 불필요)
 ```
 
-Upstash 값을 비우면 임시 메모리 저장소를 써서 서버를 끄면 데이터가 사라져요. 로컬 확인용으로는 충분해요.
+Upstash 값을 비우면 `npm run dev`(로컬 개발)와 테스트에서는 임시 메모리 저장소를 써서 서버를 끄면 데이터가 사라져요. 로컬 확인용으로는 충분해요. `npm run build && npm start`처럼 프로덕션 모드로 실행하거나 Vercel에 배포하면 메모리 저장소로 넘어가지 않고 설정 안내 오류를 내요.
 
 ## 9. 문제 해결
 

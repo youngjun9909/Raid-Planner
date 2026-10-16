@@ -1,17 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { getStore } from '@/store/store';
 import { fetchRoster } from '@/lostark/client';
-import { badRequest, guard, isNonEmptyString, lostArkErrorResponse, readJson } from '@/lib/http';
+import { badRequest, guard, isNonEmptyString, lostArkErrorResponse, readJson, withConfigErrors } from '@/lib/http';
 
 export const maxDuration = 60;
 
-export async function GET(req: Request) {
+export const GET = withConfigErrors(async (req: Request) => {
   const denied = guard(req);
   if (denied) return denied;
   return Response.json(await getStore().listFriends());
-}
+});
 
-export async function POST(req: Request) {
+export const POST = withConfigErrors(async (req: Request) => {
   const denied = guard(req);
   if (denied) return denied;
   const body = await readJson(req);
@@ -28,4 +28,4 @@ export async function POST(req: Request) {
   } catch (err) {
     return lostArkErrorResponse(err);
   }
-}
+});

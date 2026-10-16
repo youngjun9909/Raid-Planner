@@ -1,7 +1,7 @@
 import { getStore } from '@/store/store';
-import { badRequest, errorResponse, guard, isNonEmptyString, readJson } from '@/lib/http';
+import { badRequest, errorResponse, guard, isNonEmptyString, readJson, withConfigErrors } from '@/lib/http';
 
-export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
+export const PUT = withConfigErrors(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
   const denied = guard(req);
   if (denied) return denied;
   const { id } = await ctx.params;
@@ -19,4 +19,4 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
   }
   await store.setManualCombatPower(id, body.characterName, cp);
   return Response.json(await store.getFriend(id));
-}
+});

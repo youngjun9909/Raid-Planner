@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { getStore } from '@/store/store';
 import { fetchRoster } from '@/lostark/client';
 import { runWeekly } from '@/lib/weekly';
+import { withConfigErrors } from '@/lib/http';
 
 export const maxDuration = 60;
 
@@ -14,8 +15,8 @@ function authorized(req: Request): boolean {
 }
 
 /** Vercel Cron이 주 1회 호출한다 (vercel.json). */
-export async function GET(req: Request) {
+export const GET = withConfigErrors(async (req: Request) => {
   if (!authorized(req)) return new Response('unauthorized', { status: 401 });
   const summary = await runWeekly({ store: getStore(), fetchRoster: (n) => fetchRoster(n), now: () => new Date() });
   return Response.json(summary);
-}
+});
