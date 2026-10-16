@@ -1,5 +1,6 @@
 import { eligibleCharacters } from './eligibility';
-import type { Candidate, Character, ClearRecord, Friend, Party, PlanResult, PlanSummary, RaidConfig, Slot, Tier } from './types';
+import { DEFAULT_PROFICIENCY, summarizeProficiency } from './proficiency';
+import type { Candidate, Character, ClearRecord, Friend, Party, PlanResult, PlanSummary, Proficiency, RaidConfig, Slot, Tier } from './types';
 
 /**
  * 공대 편성 (설계 수정 2026-10-16-multi-run-planning-amendment.md).
@@ -11,6 +12,11 @@ import type { Candidate, Character, ClearRecord, Friend, Party, PlanResult, Plan
  *   P 이하라 König 정리로 P색 간선 칠하기가 된다. 그래도 탐색이 못 찾으면 P+1까지 시도한다.)
  * - 탐색은 결정적 휴리스틱: 여러 번 (고정 시드) 초기 배정 → 딜러 교환/이동으로 국소 개선 → 이웃 배정까지 모아
  *   중복(공대 순서만 다른 것)을 빼고 순위대로 상위 limit개.
+ * - 숙련도(설계 수정 2026-10-16-proficiency-amendment.md): 최악 단계 다음, 전투력 균형 전에 비교한다.
+ *   (a) 숙련 친구 캐릭터가 없는 공대 수 → (b) 클경이 2명 이상인 공대 수 → (c) 공대별 숙련도 점수 차.
+ *   (c)는 공대별 (숙련=3, 반숙=2, 클경=1) 합에서 친구 수×2(모두 반숙일 때 값)를 뺀 값, 즉 숙련 +1 / 반숙 0 / 클경 -1의
+ *   합의 최대-최소로 비교한다: 공대마다 친구 수가 달라도(외부인 수 차이) 인원수 차이가 숙련도 차이로 잡히지 않게 하고,
+ *   모두 반숙이면 숙련도가 순위에 아무 영향도 주지 않게 하기 위해서다. 외부 자리는 숙련도 계산에서 빠진다.
  */
 
 /** 권장 최소 전투력의 이 비율 이상이면 'tight', 미만이면 'risky'. 조정 가능한 상수. */
@@ -45,7 +51,12 @@ export function tierFor(avg: number | null, raid: RaidConfig): Tier {
   return 'risky';
 }
 
-interface Item { friendId: string; friend: number; character: Character; support: boolean; cp: number | null; }
+/** dev = 숙련 +1, 반숙 0, 클경 -1 (반숙 기준 차이). */
+interface Item {
+  friendId: string; friend: number; character: Character; support: boolean; cp: number | null;
+  level: Proficiency; dev: number;
+}
+const DEV: Record<Proficiency, number> = { 숙련: 1, 반숙: 0, 클경: -1 };
 
 /** 고정 시드 난수 (mulberry32). 같은 입력이면 같은 결과. */
 function rng(seed: number): () => number {
@@ -59,15 +70,21 @@ function rng(seed: number): () => number {
   };
 }
 
-/** 점수: 최악 단계 → 그 단계인 공대 수 → imbalance → 평균 분산(동률 깨기). 작을수록 좋다. */
-interface Score { worst: number; worstCount: number; imbalance: number; spread: number; }
-const compareScore = (a: Score, b: Score) =>
-  a.worst - b.worst || a.worstCount - b.worstCount
-  || (Math.abs(a.imbalance - b.imbalance) > EPS ? a.imbalance - b.imbalance : 0)
-  || (Math.abs(a.spread - b.spread) > EPS ? a.spread - b.spread : 0);
+/**
+ * 점수: 최악 단계 → 그 단계인 공대 수 → 숙련자 없는 공대 수 → 클경 2명 이상 공대 수 → 숙련도 점수 차 →
+ * imbalance → 평균 분산(동률 깨기). 작을수록 좋다.
+ */
+interface Score {
+  worst: number; worstCount: number; noExpert: number; multiNovice: number; profRange: number;
+  imbalance: number; spread: number;
+}
 /** 분산(동률 깨기)을 뺀 비교. 점수 그대로인 조작 뒤의 개선은 이 기준으로 좋아질 때만 받아들인다. */
 const compareMain = (a: Score, b: Score) =>
-  a.worst - b.worst || a.worstCount - b.worstCount || (Math.abs(a.imbalance - b.imbalance) > EPS ? a.imbalance - b.imbalance : 0);
+  a.worst - b.worst || a.worstCount - b.worstCount
+  || a.noExpert - b.noExpert || a.multiNovice - b.multiNovice || a.profRange - b.profRange
+  || (Math.abs(a.imbalance - b.imbalance) > EPS ? a.imbalance - b.imbalance : 0);
+const compareScore = (a: Score, b: Score) =>
+  compareMain(a, b) || (Math.abs(a.spread - b.spread) > EPS ? a.spread - b.spread : 0);
 
 /** 배정 상태: item → 공대. 공대별 친구 수/역할 수/딜러 전투력 합을 같이 들고 다닌다. */
 class Layout {
@@ -78,6 +95,9 @@ class Layout {
   readonly size: Int32Array;
   readonly cpSum: Float64Array;
   readonly cpN: Int32Array;
+  readonly expert: Int32Array; // 공대별 숙련 친구 캐릭터 수
+  readonly novice: Int32Array; // 공대별 클경 수
+  readonly dev: Int32Array; // 공대별 숙련도 점수 (반숙 기준 차이의 합)
   constructor(readonly ctx: Ctx) {
     const { items, P, F } = ctx;
     this.assign = new Int32Array(items.length).fill(-1);
@@ -87,6 +107,9 @@ class Layout {
     this.size = new Int32Array(P);
     this.cpSum = new Float64Array(P);
     this.cpN = new Int32Array(P);
+    this.expert = new Int32Array(P);
+    this.novice = new Int32Array(P);
+    this.dev = new Int32Array(P);
   }
   canPlace(i: number, p: number): boolean {
     const it = this.ctx.items[i];
@@ -98,6 +121,8 @@ class Layout {
     this.assign[i] = p;
     this.has[p * this.ctx.F + it.friend]++;
     this.size[p]++;
+    if (it.dev > 0) this.expert[p]++; else if (it.dev < 0) this.novice[p]++;
+    this.dev[p] += it.dev;
     if (it.support) this.sup[p]++;
     else {
       this.deal[p]++;
@@ -110,6 +135,8 @@ class Layout {
     this.assign[i] = -1;
     this.has[p * this.ctx.F + it.friend]--;
     this.size[p]--;
+    if (it.dev > 0) this.expert[p]--; else if (it.dev < 0) this.novice[p]--;
+    this.dev[p] -= it.dev;
     if (it.support) this.sup[p]--;
     else {
       this.deal[p]--;
@@ -125,7 +152,15 @@ class Layout {
     let sum = 0;
     let n = 0;
     let sq = 0;
+    let noExpert = 0;
+    let multiNovice = 0;
+    let devMax = -Infinity;
+    let devMin = Infinity;
     for (let p = 0; p < P; p++) {
+      if (this.expert[p] === 0) noExpert++;
+      if (this.novice[p] >= 2) multiNovice++;
+      if (this.dev[p] > devMax) devMax = this.dev[p];
+      if (this.dev[p] < devMin) devMin = this.dev[p];
       const avg = this.cpN[p] ? this.cpSum[p] / this.cpN[p] : null;
       const b = TIER_BADNESS[tierFor(avg, raid)];
       if (b > worst) { worst = b; worstCount = 1; } else if (b === worst) worstCount++;
@@ -137,12 +172,16 @@ class Layout {
         n++;
       }
     }
-    return { worst, worstCount, imbalance: n ? max - min : 0, spread: n ? sq / n - (sum / n) ** 2 : 0 };
+    return {
+      worst, worstCount, noExpert, multiNovice, profRange: P ? devMax - devMin : 0,
+      imbalance: n ? max - min : 0, spread: n ? sq / n - (sum / n) ** 2 : 0,
+    };
   }
   clone(): Layout {
     const l = new Layout(this.ctx);
     l.assign.set(this.assign); l.has.set(this.has); l.sup.set(this.sup); l.deal.set(this.deal);
     l.size.set(this.size); l.cpSum.set(this.cpSum); l.cpN.set(this.cpN);
+    l.expert.set(this.expert); l.novice.set(this.novice); l.dev.set(this.dev);
     return l;
   }
   key(): string {
@@ -260,8 +299,11 @@ function move(L: Layout, i: number, q: number) {
   L.place(i, q);
 }
 
-/** 점수가 바뀌지 않는 조작인지 (서포터끼리, 전투력 없는 캐릭터끼리). 일반 탐색에서는 건너뛴다. */
-const neutral = (items: Item[], i: number, j: number) => items[i].cp === items[j].cp && items[i].support === items[j].support;
+/** 점수가 바뀌지 않는 교환인지 (전투력·역할·숙련도가 같은 캐릭터끼리). 일반 탐색에서는 건너뛴다. */
+const neutral = (items: Item[], i: number, j: number) =>
+  items[i].cp === items[j].cp && items[i].support === items[j].support && items[i].dev === items[j].dev;
+/** 점수가 바뀌지 않는 이동인지 (전투력이 없고 반숙인 캐릭터: 서포터, 전투력 모르는 딜러). */
+const neutralMove = (it: Item) => it.cp === null && it.dev === 0;
 
 /**
  * 공대 touched(1~2개)에 걸친 교환/이동 중 점수가 (분산 말고) 좋아지는 첫 조작을 적용한다. 적용했으면 새 점수, 없으면 null.
@@ -281,7 +323,7 @@ function improveAround(L: Layout, touched: number[], cur: Score): Score | null {
         swap(L, i, j);
       }
     }
-    if (items[i].cp === null) continue;
+    if (neutralMove(items[i])) continue;
     for (let q = 0; q < P; q++) {
       if (!(inside || touched.includes(q)) || !canMove(L, i, q)) continue;
       const from = L.assign[i];
@@ -315,7 +357,7 @@ function improve(L: Layout): Score {
       }
     }
     for (let i = 0; i < n; i++) {
-      if (items[i].cp === null) continue; // 서포터/전투력 없는 딜러 이동은 점수가 그대로
+      if (neutralMove(items[i])) continue; // 반숙인 서포터/전투력 없는 딜러 이동은 점수가 그대로
       for (let q = 0; q < P; q++) {
         if (!canMove(L, i, q)) continue;
         const from = L.assign[i];
@@ -325,11 +367,11 @@ function improve(L: Layout): Score {
       }
     }
     if (improved) continue;
-    // 막혔다: 점수 그대로인 조작(전투력 없는 캐릭터의 이동, 그런 캐릭터끼리의 교환)으로 자리를 비워 본다.
+    // 막혔다: 점수 그대로인 조작(전투력 없는 반숙 캐릭터의 이동, 점수가 같은 캐릭터끼리의 교환)으로 자리를 비워 본다.
     let kicks = 0;
     let kicked = false;
     outer: for (let i = 0; i < n && kicks < kickLimit; i++) {
-      if (items[i].cp !== null) continue;
+      if (!neutralMove(items[i])) continue;
       for (let q = 0; q < P && kicks < kickLimit; q++) {
         if (!canMove(L, i, q)) continue;
         kicks++;
@@ -413,7 +455,7 @@ function toCandidate(f: Found): Candidate {
     const extSupports = supportSlots - sups;
     const extDealers = raid.size - members.length - extSupports;
     const slots: Slot[] = [
-      ...members.map(({ it }): Slot => ({ kind: 'friend', friendId: it.friendId, character: it.character })),
+      ...members.map(({ it }): Slot => ({ kind: 'friend', friendId: it.friendId, character: it.character, proficiency: it.level })),
       ...Array.from({ length: extSupports }, (): Slot => ({ kind: 'external', role: 'support' })),
       ...Array.from({ length: extDealers }, (): Slot => ({ kind: 'external', role: 'dealer' })),
     ];
@@ -421,12 +463,12 @@ function toCandidate(f: Found): Candidate {
     const cps = members.flatMap(({ it }) => (it.cp === null ? [] : [it.cp]));
     const dealerAvgCP = cps.length ? cps.reduce((x, y) => x + y, 0) / cps.length : null;
     parties.push({
-      slots, dealerAvgCP, tier: tierFor(dealerAvgCP, raid),
+      slots, dealerAvgCP, tier: tierFor(dealerAvgCP, raid), proficiency: summarizeProficiency(slots),
       key: members.map(({ it }) => it.character.name).sort().join('\u0001'), friends: members.length,
     });
   }
   parties.sort((a, b) => b.friends - a.friends || (b.dealerAvgCP ?? -Infinity) - (a.dealerAvgCP ?? -Infinity) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-  const clean: Party[] = parties.map(({ slots, dealerAvgCP, tier }) => ({ slots, dealerAvgCP, tier }));
+  const clean: Party[] = parties.map(({ slots, dealerAvgCP, tier, proficiency }) => ({ slots, dealerAvgCP, tier, proficiency }));
   const avgs = clean.flatMap((p) => (p.dealerAvgCP === null ? [] : [p.dealerAvgCP]));
   const imbalance = avgs.length ? Math.max(...avgs) - Math.min(...avgs) : 0;
   return { parties: clean, summary: summarize(clean), imbalance };
@@ -450,7 +492,7 @@ export function summarize(parties: Party[]): PlanSummary {
   };
 }
 
-/** 순위(설계 수정 5번): 외부 서포터 수 → 외부 총 인원 → 최악 단계 → imbalance. */
+/** 순위(설계 수정 5번 + 숙련도 3번): 외부 서포터 수 → 외부 총 인원 → 최악 단계 → 그 단계 공대 수 → 숙련도 균형 → imbalance. */
 function compareFound(a: Found & { ext: [number, number] }, b: Found & { ext: [number, number] }): number {
   return a.ext[0] - b.ext[0] || a.ext[1] - b.ext[1] || compareScore(a.score, b.score) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
 }
@@ -461,8 +503,10 @@ export function planRaid(input: {
   clears: ClearRecord[];
   attendeeIds: string[];
   limit?: number;
+  /** 이 레이드(이름)에서 캐릭터의 숙련도. 주지 않으면 모두 반숙 (숙련도가 순위에 영향 없음). */
+  proficiency?: (friendId: string, characterName: string) => Proficiency;
 }): PlanResult {
-  const { raid, friends, clears, attendeeIds, limit = DEFAULT_PLAN_LIMIT } = input;
+  const { raid, friends, clears, attendeeIds, limit = DEFAULT_PLAN_LIMIT, proficiency } = input;
   const excluded: PlanResult['excluded'] = [];
   const attendees = new Set(attendeeIds);
   const items: Item[] = [];
@@ -477,7 +521,11 @@ export function planRaid(input: {
     const friend = charsPerFriend.length;
     charsPerFriend.push(eligible.length);
     for (const c of eligible) {
-      items.push({ friendId: f.id, friend, character: c, support: c.role === 'support', cp: c.role === 'support' ? null : c.combatPower });
+      const level = proficiency?.(f.id, c.name) ?? DEFAULT_PROFICIENCY;
+      items.push({
+        friendId: f.id, friend, character: c, support: c.role === 'support', cp: c.role === 'support' ? null : c.combatPower,
+        level, dev: DEV[level],
+      });
     }
   }
   if (items.length === 0) {

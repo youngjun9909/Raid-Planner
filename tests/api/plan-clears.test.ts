@@ -25,6 +25,16 @@ describe('POST /api/plan', () => {
     expect(json.candidates.length).toBeGreaterThan(0);
     expect(json.excluded).toEqual([]);
   });
+  it('저장된 숙련도(그 레이드 이름)를 편성에 넘긴다: 친구 자리와 공대 요약에 숙련도가 실린다', async () => {
+    await store.setProficiency('a', 'A1', '세르카', '숙련');
+    await store.setProficiency('b', 'B1', '벨가르딘', '클경'); // 다른 레이드 값은 쓰지 않는다
+    const json = await (await plan({ raidId: 'serka-normal', attendeeIds: ['a', 'b'] })).json();
+    const party = json.candidates[0].parties[0];
+    const profs = Object.fromEntries(party.slots.filter((s: { kind: string }) => s.kind === 'friend')
+      .map((s: { character: { name: string }; proficiency: string }) => [s.character.name, s.proficiency]));
+    expect(profs).toEqual({ A1: '숙련', B1: '반숙' });
+    expect(party.proficiency).toEqual({ 숙련: 1, 반숙: 1, 클경: 0, noExpert: false });
+  });
   it('알 수 없는 raidId는 400', async () => {
     const res = await plan({ raidId: 'nope', attendeeIds: ['a'] });
     expect(res.status).toBe(400);

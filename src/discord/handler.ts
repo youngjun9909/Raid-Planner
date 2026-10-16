@@ -3,6 +3,7 @@ import type { Store } from '@/store/store';
 import { LostArkError, type LostArkErrorCode, type fetchRoster as FetchRoster } from '@/lostark/client';
 import { getRaid, RAIDS } from '@/core/raids';
 import { planRaid } from '@/core/planner';
+import { proficiencyLookup } from '@/core/proficiency';
 import { weekKey } from '@/core/week';
 import type { Character, ClearRecord, Friend, RaidConfig } from '@/core/types';
 import { applyClearChange, formatLevel } from '@/lib/view-model';
@@ -185,7 +186,7 @@ async function followUp(body: DiscordInteraction, message: MessageParts, deps: D
 async function planFor(raid: RaidConfig, deps: Deps, wrap: (p: MessageParts) => DiscordResponse, fail: Fail): Promise<HandlerResult> {
   const [friends, clears] = await Promise.all([deps.store.listFriends(), deps.store.getClears(weekKey(deps.now()))]);
   if (friends.length === 0) return fail(NO_FRIENDS_TEXT, FIX.registerFirst);
-  const result = planRaid({ raid, friends, clears, attendeeIds: friends.map((f) => f.id) });
+  const result = planRaid({ raid, friends, clears, attendeeIds: friends.map((f) => f.id), proficiency: proficiencyLookup(friends, raid.name) });
   return only(wrap(formatPlan(raid, result, friends, deps.now())));
 }
 
