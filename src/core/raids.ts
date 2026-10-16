@@ -18,6 +18,9 @@ export const RAIDS: RaidConfig[] = [
   { id: 'belgardin-nightmare', name: '벨가르딘', difficulty: '나이트메어', size: 8, minLevel: 1780, recommendedCP: { min: 7000, max: null } },
 ];
 
+/** 가장 낮은 레이드 입장 레벨 (지금 1700). 이보다 낮은 캐릭터는 화면에 보이지 않고 원정대 조회에서도 빠진다. */
+export const MIN_RAID_LEVEL = Math.min(...RAIDS.map((r) => r.minLevel));
+
 export function getRaid(id: string): RaidConfig | undefined {
   return RAIDS.find((r) => r.id === id);
 }

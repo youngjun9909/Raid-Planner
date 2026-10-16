@@ -14,6 +14,11 @@ export interface Friend {
    * (빠진 칸은 기본값 반숙). saveFriend는 이 필드를 저장하지 않는다 (setProficiency로만 바뀐다).
    */
   proficiency?: Record<string, Proficiency>;
+  /**
+   * 저장소가 읽을 때만 붙이는 가는 난이도 (직접 정한 값만): 키 `<캐릭터 이름>|<레이드 이름>` → 난이도 이름 또는 `안 감`.
+   * 빠진 칸은 자동 기본값 (설계 수정 2026-10-16-friend-first-amendment.md A). saveFriend는 저장하지 않는다.
+   */
+  targetDifficulty?: Record<string, string>;
 }
 export interface RaidConfig { id: string; name: string; difficulty: string; size: 4 | 8; minLevel: number; recommendedCP: { min: number; max: number | null }; }
 export interface ClearRecord { characterName: string; raidName: string; difficulty: string; }

@@ -15,12 +15,12 @@
  *    예외는 수동 역할 지정으로 바꿔요 (PUT /api/friends/[id]/role).
  */
 import type { Character, Role } from '@/core/types';
-import { RAIDS, SUPPORT_CLASSES } from '@/core/raids';
+import { MIN_RAID_LEVEL, SUPPORT_CLASSES } from '@/core/raids';
 
 const BASE_URL = 'https://developer-lostark.game.onstove.com';
 
-/** 가장 낮은 레이드 입장 레벨. 이보다 낮은 캐릭터는 프로필(전투력)을 조회하지 않는다. */
-export const MIN_RAID_LEVEL = Math.min(...RAIDS.map((r) => r.minLevel));
+/** 가장 낮은 레이드 입장 레벨 (core/raids에서 정의, 예전 import 경로를 위해 다시 내보낸다). 이보다 낮은 캐릭터는 프로필(전투력)을 조회하지 않는다. */
+export { MIN_RAID_LEVEL };
 
 const MESSAGES = {
   not_found: '캐릭터를 찾을 수 없어요',
