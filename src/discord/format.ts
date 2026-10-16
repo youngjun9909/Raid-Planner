@@ -5,7 +5,7 @@
 import { RAIDS } from '@/core/raids';
 import { weekKey } from '@/core/week';
 import type { Candidate, Character, ClearRecord, Friend, Party, PlanResult, RaidConfig, Slot, Tier } from '@/core/types';
-import { countExternals, formatCP, formatLevel, formatRange } from '@/lib/view-model';
+import { countExternals, formatCP, formatLevel, formatRange, planSummaryText } from '@/lib/view-model';
 import { COMMAND_GROUPS, raidTitle, type CommandDef } from './commands';
 import { BOT_NAME, COLOR, GAUGE, ICON, TIER_BADNESS, TIER_COLOR, TIER_TEXT } from './theme';
 import type { ActionRow, Embed, EmbedField } from './types';
@@ -147,26 +147,42 @@ export function gauge(avg: number | null, recommendedMin: number): string {
   return `${GAUGE.full.repeat(filled)}${GAUGE.empty.repeat(GAUGE.cells - filled)} ${pct}%`;
 }
 
-/** 후보 한 줄 요약: "평균 전투력 3,900 · 권장 3,600~4,000 · 🟢 여유". */
-export function summaryLine(avg: number | null, raid: RaidConfig, tier: Tier): string {
-  return `평균 전투력 ${avg === null ? '정보 없음' : formatCP(avg)} · 권장 ${formatRange(raid)} · ${TIER_TEXT[tier]}`;
-}
-
 // ---------- /공대 ----------
 
-function memberLine(slot: Slot, names: Map<string, string>): string {
+/**
+ * 메시지 분량 단계. 0 = 평소(외부인 한 줄씩, 게이지, 공대 사이 빈칸), 1 = 외부인을 역할별 한 줄로,
+ * 2 = 게이지와 아이템 레벨도 뺀다. 추천이 다 들어갈 때까지 단계를 올린다.
+ */
+type Detail = 0 | 1 | 2;
+
+function memberLine(slot: Slot, names: Map<string, string>, detail: Detail = 0): string {
   if (slot.kind === 'external') return `${ICON.external} 외부 ${slot.role === 'support' ? '서포터' : '딜러'} 구하기`;
   const c = slot.character;
   const owner = names.get(slot.friendId) ?? '?';
+  const level = detail < 2 ? ` · ${formatLevel(c.itemLevel)}` : '';
   return c.role === 'support'
-    ? `${ICON.support} **${c.name}** · ${formatLevel(c.itemLevel)} · ${owner}`
-    : `${ICON.dealer} **${c.name}** · ${formatLevel(c.itemLevel)} · CP ${formatCP(c.combatPower)} · ${owner}`;
+    ? `${ICON.support} **${c.name}**${level} · ${owner}`
+    : `${ICON.dealer} **${c.name}**${level} · CP ${formatCP(c.combatPower)} · ${owner}`;
 }
 
-function partyField(p: Party, i: number, raid: RaidConfig, names: Map<string, string>): EmbedField {
+function memberLines(p: Party, names: Map<string, string>, detail: Detail): string[] {
+  if (detail === 0) return p.slots.map((s) => memberLine(s, names));
+  const friends = p.slots.filter((s) => s.kind === 'friend').map((s) => memberLine(s, names, detail));
+  const { support, dealer } = countExternals(p.slots);
+  return [
+    ...friends,
+    ...(support ? [`${ICON.external} 외부 서포터 ${support}명 구하기`] : []),
+    ...(dealer ? [`${ICON.external} 외부 딜러 ${dealer}명 구하기`] : []),
+  ];
+}
+
+/** 공대 칸: 이름 "1공대 · 평균 3,900 🟢 여유", 값은 게이지 + 구성원 줄. */
+function partyField(p: Party, i: number, raid: RaidConfig, names: Map<string, string>, detail: Detail = 0): EmbedField {
+  const avg = p.dealerAvgCP === null ? '정보 없음' : formatCP(p.dealerAvgCP);
+  const lines = memberLines(p, names, detail);
   return {
-    name: `공대 ${i + 1} · ${TIER_TEXT[p.tier]}`,
-    value: [`\`${gauge(p.dealerAvgCP, raid.recommendedCP.min)}\``, ...p.slots.map((s) => memberLine(s, names))].join('\n'),
+    name: `${i + 1}공대 · 평균 ${avg} ${TIER_TEXT[p.tier]}`,
+    value: (detail < 2 ? [`\`${gauge(p.dealerAvgCP, raid.recommendedCP.min)}\``, ...lines] : lines).join('\n'),
   };
 }
 
@@ -180,12 +196,6 @@ export function externalFooter(parties: Party[]): string {
 
 export const worstTier = (parties: Party[]): Tier =>
   parties.reduce<Tier>((w, p) => (TIER_BADNESS[p.tier] > TIER_BADNESS[w] ? p.tier : w), 'comfortable');
-
-/** 공대들의 딜러 평균을 다시 평균 (모르는 공대는 뺀다). */
-function overallAvg(parties: Party[]): number | null {
-  const avgs = parties.map((p) => p.dealerAvgCP).filter((v): v is number => v !== null);
-  return avgs.length ? avgs.reduce((a, b) => a + b, 0) / avgs.length : null;
-}
 
 function excludedText(result: PlanResult, names: Map<string, string>): string {
   return result.excluded.length
@@ -204,40 +214,83 @@ export function planButtons(raid: RaidConfig): ActionRow {
   };
 }
 
-function candidateEmbed(c: Candidate, i: number, raid: RaidConfig, names: Map<string, string>, excluded: string, now: Date): Embed {
+interface EmbedOpts { detail: Detail; shown?: number; }
+
+/** 추천 하나 = 임베드 하나: 제목 "⭐ 추천 1 · 세르카 하드", 설명 = 요약 한 줄, 공대마다 칸 하나. */
+function candidateEmbed(c: Candidate, i: number, raid: RaidConfig, names: Map<string, string>, excluded: string, now: Date, opts: EmbedOpts): Embed {
+  const shown = Math.min(opts.shown ?? c.parties.length, c.parties.length);
+  const spacers = opts.detail === 0 && shown * 2 - 1 <= LIMITS.fields;
   const fields: EmbedField[] = [];
-  c.parties.forEach((p, j) => {
-    if (j > 0) fields.push(SPACER);
-    fields.push(partyField(p, j, raid, names));
+  c.parties.slice(0, shown).forEach((p, j) => {
+    if (j > 0 && spacers) fields.push(SPACER);
+    fields.push(partyField(p, j, raid, names, opts.detail));
   });
   const description = [
-    summaryLine(overallAvg(c.parties), raid, worstTier(c.parties)),
+    planSummaryText(c.summary),
+    `권장 전투력 ${formatRange(raid)}`,
+    ...(shown < c.parties.length ? [`공대 ${c.parties.length}개 중 ${shown}개만 보여요 (길어서 줄였어요). 전체는 웹 화면에서 볼 수 있어요.`] : []),
     ...(i === 0 && excluded ? [excluded] : []),
   ].join('\n');
-  return frame(now, `${ICON.party} 공대 후보`, {
-    title: `${i === 0 ? `${ICON.star} 추천 · ` : `후보 ${i + 1} · `}${raidTitle(raid)}`,
+  return frame(now, `${ICON.party} 공대 추천`, {
+    title: `${i === 0 ? `${ICON.star} ` : ''}추천 ${i + 1} · ${raidTitle(raid)}`,
     color: TIER_COLOR[worstTier(c.parties)],
     description,
     fields,
   }, `${ICON.external} ${externalFooter(c.parties)}`);
 }
 
-/** 공대 후보를 임베드로 (후보 하나에 임베드 하나, 첫 후보에 ⭐ 추천) + 버튼. */
+/** 줄이지 않아도 디스코드 제한 안에 들어가는 임베드인지. */
+function fitsAsIs(e: Embed): boolean {
+  const f = e.fields ?? [];
+  return f.length <= LIMITS.fields && f.every((x) => x.value.length <= LIMITS.fieldValue && x.name.length <= LIMITS.fieldName)
+    && (e.description?.length ?? 0) <= LIMITS.description && (e.title?.length ?? 0) <= LIMITS.title;
+}
+
+/**
+ * 추천 임베드를 메시지 제한(임베드 합계 6000자, 칸 25개, 칸 1024자) 안에 맞춘다.
+ * 분량 단계를 올려 가며 추천 전부가 들어가는 단계를 찾고, 가장 짧게 해도 안 되면 앞에서부터 들어가는 추천만 남긴다.
+ * 첫 추천 하나도 안 들어가면 공대를 뒤에서부터 줄이고 설명에 그 사실을 적는다 (공대가 말없이 잘리지 않게).
+ */
+function planEmbeds(result: PlanResult, raid: RaidConfig, names: Map<string, string>, excluded: string, now: Date): Embed[] {
+  const make = (c: Candidate, i: number, opts: EmbedOpts) => candidateEmbed(c, i, raid, names, excluded, now, opts);
+  const total = (es: Embed[]) => es.reduce((s, e) => s + embedSize(e), 0);
+  const cands = result.candidates.slice(0, LIMITS.embeds);
+  for (const detail of [0, 1, 2] as Detail[]) {
+    const es = cands.map((c, i) => make(c, i, { detail }));
+    if (es.every(fitsAsIs) && total(es) <= LIMITS.embedTotal) return es;
+  }
+  const out: Embed[] = [];
+  for (const [i, c] of cands.entries()) {
+    const e = make(c, i, { detail: 2 });
+    if (fitsAsIs(e) && total([...out, e]) <= LIMITS.embedTotal) { out.push(e); continue; }
+    if (i > 0) break;
+    let shown = Math.min(c.parties.length - 1, LIMITS.fields);
+    let cut = make(c, i, { detail: 2, shown });
+    while (shown > 1 && !(fitsAsIs(cut) && embedSize(cut) <= LIMITS.embedTotal)) cut = make(c, i, { detail: 2, shown: --shown });
+    out.push(cut);
+    break;
+  }
+  return out;
+}
+
+/** 공대 추천을 임베드로 (추천 하나에 임베드 하나, 첫 추천에 ⭐) + 버튼. */
 export function formatPlan(raid: RaidConfig, result: PlanResult, friends: Friend[], now: Date): MessageParts {
   const names = new Map(friends.map((f) => [f.id, f.displayName]));
   const title = raidTitle(raid);
   const excluded = excludedText(result, names);
   const buttons = [planButtons(raid)];
   if (result.candidates.length === 0) {
-    const reason = result.reason ?? '가능한 공대 후보가 없어요';
-    return parts(`${title}: 이번에는 공대 후보가 없어요`, [frame(now, `${ICON.party} 공대 후보`, {
-      title: `${title} · 후보 없음`,
+    const reason = result.reason ?? '가능한 공대 추천이 없어요';
+    return parts(`${title}: 이번에는 공대 추천이 없어요`, [frame(now, `${ICON.party} 공대 추천`, {
+      title: `${title} · 추천 없음`,
       color: COLOR.unknown,
       description: [`😢 ${reason}`, excluded, '클리어 표시나 레벨이 바뀌면 다시 계산해 보세요.'].filter(Boolean).join('\n'),
     })], buttons);
   }
-  const embeds = result.candidates.map((c, i) => candidateEmbed(c, i, raid, names, excluded, now));
-  return parts(`${ICON.party} ${title} 공대 후보 ${result.candidates.length}개를 찾았어요`, embeds, buttons);
+  const embeds = planEmbeds(result, raid, names, excluded, now);
+  const n = result.candidates.length;
+  const note = embeds.length < n ? ` (길어서 ${embeds.length}개만 보여요)` : '';
+  return parts(`${ICON.party} ${title} 공대 추천 ${n}개를 찾았어요${note}`, embeds, buttons);
 }
 
 // ---------- /현황, /클리어 ----------
