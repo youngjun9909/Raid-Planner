@@ -84,7 +84,7 @@ export function PlanBoard({
     return (
       <div className="empty">
         <p className="empty__title">위에서 이번 주에 돌 레이드를 골라 주세요</p>
-        <p className="muted">고른 레이드마다 분배 방식별 공대 후보가 여기에 나와요.</p>
+        <p className="muted">고른 레이드마다 추천 편성이 여기에 나와요.</p>
       </div>
     );
   }

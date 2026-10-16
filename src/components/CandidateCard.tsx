@@ -1,5 +1,5 @@
 import type { Candidate, Friend, Party } from '@/core/types';
-import { ROLE_LABEL, countExternals, externalSummary, formatCP, formatLevel } from '@/lib/view-model';
+import { ROLE_LABEL, formatCP, formatLevel, planSummaryText } from '@/lib/view-model';
 import { TierBadge } from './TierBadge';
 
 function PartyBlock({ party, index, names }: { party: Party; index: number; names: Map<string, string> }) {
@@ -39,6 +39,7 @@ function PartyBlock({ party, index, names }: { party: Party; index: number; name
   );
 }
 
+/** 추천 하나 = 완성된 편성. 요약 한 줄 아래에 1공대, 2공대, …를 세로로 쌓는다. */
 export function CandidateCard({
   candidate,
   rank,
@@ -51,33 +52,32 @@ export function CandidateCard({
   raidId: string;
 }) {
   const names = new Map(friends.map((f) => [f.id, f.displayName]));
-  const ext = candidate.parties.reduce(
-    (acc, p) => {
-      const c = countExternals(p.slots);
-      return { support: acc.support + c.support, dealer: acc.dealer + c.dealer };
-    },
-    { support: 0, dealer: 0 },
-  );
   const titleId = `cand-${raidId}-${rank}`; // 레이드마다 섹션이 따로 있어 레이드 id를 넣어야 겹치지 않는다
+  const best = rank === 0;
   return (
-    <article className="candidate" aria-labelledby={titleId}>
+    <article className={`candidate${best ? ' candidate--best' : ''}`} aria-labelledby={titleId}>
       <header className="candidate__head">
-        <h4 id={titleId} className="candidate__label">
+        <h4 id={titleId} className="candidate__title">
+          {best && (
+            <span className="candidate__star" aria-hidden="true">
+              ⭐
+            </span>
+          )}
           추천 {rank + 1}
         </h4>
-        {rank === 0 && <span className="candidate__pick">추천</span>}
+        {best && <span className="candidate__pick">가장 좋은 편성</span>}
+        <p className={`candidate__summary${candidate.summary.externalCount ? '' : ' candidate__summary--none'}`}>
+          {planSummaryText(candidate.summary)}
+        </p>
       </header>
       <div className="candidate__parties">
         {candidate.parties.map((p, i) => (
           <PartyBlock key={i} party={p} index={i} names={names} />
         ))}
       </div>
-      <footer className={`candidate__foot${candidate.summary.externalCount ? '' : ' candidate__foot--none'}`}>
-        {externalSummary(ext.support, ext.dealer)}
-        {candidate.parties.length > 1 && candidate.imbalance > 0 && (
-          <span className="muted"> (공대 간 평균 차이 {formatCP(candidate.imbalance)})</span>
-        )}
-      </footer>
+      {candidate.parties.length > 1 && candidate.imbalance > 0 && (
+        <footer className="candidate__foot muted">공대 간 딜러 평균 차이 {formatCP(candidate.imbalance)}</footer>
+      )}
     </article>
   );
 }

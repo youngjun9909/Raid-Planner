@@ -991,10 +991,10 @@ select {
 }
 
 .candidates {
+  /* 추천 카드는 넓은 화면에서도 나란히 두지 않고 세로로 쌓는다 (추천 1, 추천 2, …) */
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--s5);
-  align-items: start;
   transition: opacity 150ms;
 }
 
@@ -1011,33 +1011,31 @@ select {
   min-width: 0;
 }
 
+.candidate--best {
+  border-color: var(--accent-strong);
+}
+
 .candidate__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--s3);
+  gap: var(--s2) var(--s3);
   padding: var(--s4) var(--s5) var(--s3);
 }
 
-.candidate__label {
+.candidate__title {
   display: flex;
   align-items: baseline;
   gap: var(--s2);
-}
-
-.candidate__split {
   font-family: var(--font-display);
   font-weight: 800;
   font-size: var(--fs-xl);
   line-height: 1;
   color: var(--accent-strong);
-  font-variant-numeric: lining-nums;
 }
 
-.candidate__split-word {
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  color: var(--text-muted);
+.candidate__star {
+  font-size: 0.85em;
 }
 
 .candidate__pick {
@@ -1047,6 +1045,18 @@ select {
   color: var(--accent-strong);
   font-size: var(--fs-xs);
   font-weight: 600;
+}
+
+.candidate__summary {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.candidate__summary--none {
+  color: var(--tier-comfortable);
 }
 
 .candidate__parties {
@@ -1198,11 +1208,6 @@ select {
   border-top: 1px solid var(--line);
   background: var(--surface-2);
   font-size: var(--fs-sm);
-  font-weight: 600;
-}
-
-.candidate__foot--none {
-  color: var(--tier-comfortable);
 }
 
 @media (prefers-reduced-motion: reduce) {

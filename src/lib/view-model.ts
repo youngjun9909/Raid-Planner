@@ -1,5 +1,5 @@
 import { RAIDS } from '@/core/raids';
-import type { ClearRecord, RaidConfig, Role, Slot, Tier } from '@/core/types';
+import type { ClearRecord, PlanSummary, RaidConfig, Role, Slot, Tier } from '@/core/types';
 
 /** 레이드 이름별 묶음 (설정 순서 유지). 클리어 표의 열과 레이드 선택 화면에 쓴다. */
 export interface RaidGroup { name: string; raids: RaidConfig[]; }
@@ -87,9 +87,13 @@ export function countExternals(slots: Slot[]): { support: number; dealer: number
   return { support, dealer };
 }
 
-export function externalSummary(support: number, dealer: number): string {
-  const total = support + dealer;
-  if (total === 0) return '외부 인원 없이 가능';
-  const parts = [support ? `서포터 ${support}` : '', dealer ? `딜러 ${dealer}` : ''].filter(Boolean);
-  return `외부 ${total}명 필요 (${parts.join(', ')})`;
+/**
+ * 추천 한 줄 요약 (웹/디스코드 공통):
+ * "친구 2명 · 캐릭터 3개 · 공대 2개 · 외부 5명 필요 (서포터 2, 딜러 3)", 외부인이 없으면 "… · 친구들만으로 구성 가능".
+ */
+export function planSummaryText(s: PlanSummary): string {
+  const head = `친구 ${s.friendCount}명 · 캐릭터 ${s.characterCount}개 · 공대 ${s.partyCount}개`;
+  return s.externalCount === 0
+    ? `${head} · 친구들만으로 구성 가능`
+    : `${head} · 외부 ${s.externalCount}명 필요 (서포터 ${s.externalSupports}, 딜러 ${s.externalDealers})`;
 }

@@ -122,43 +122,74 @@ describe('웹 화면', () => {
     expect(select.value).toBe('나이트메어');
   });
 
-  it('후보 카드에 분배 라벨(3+2), 공대별 평균, 단계(여유/빠듯함/위험/모름), 외부인 수가 보인다', async () => {
-    const candidate: Candidate = {
-      label: '3+2',
-      externalCount: 3,
-      imbalance: 350,
-      parties: [
-        {
-          slots: [
-            { kind: 'friend', friendId: 'f1', character: ch('가나', 'dealer', 2450) },
-            { kind: 'external', role: 'support' },
-          ],
-          dealerAvgCP: 2450,
-          tier: 'comfortable',
-        },
-        {
-          slots: [
-            { kind: 'friend', friendId: 'f2', character: ch('다라', 'dealer', 2100) },
-            { kind: 'external', role: 'support' },
-            { kind: 'external', role: 'dealer' },
-          ],
-          dealerAvgCP: 2100,
-          tier: 'tight',
-        },
+  // 영준(f1): 가나 + 가나서폿 두 캐릭터로 1공대·2공대에, 민수(f2): 다라로 1공대에만
+  const multiRun: Candidate = {
+    summary: { friendCount: 2, characterCount: 3, partyCount: 2, externalCount: 5, externalSupports: 1, externalDealers: 4 },
+    imbalance: 350,
+    parties: [
+      {
+        slots: [
+          { kind: 'friend', friendId: 'f1', character: ch('가나', 'dealer', 2450) },
+          { kind: 'friend', friendId: 'f2', character: ch('다라', 'dealer', 2100) },
+          { kind: 'external', role: 'support' },
+          { kind: 'external', role: 'dealer' },
+        ],
+        dealerAvgCP: 2275,
+        tier: 'comfortable',
+      },
+      {
+        slots: [
+          { kind: 'friend', friendId: 'f1', character: ch('가나서폿', 'support', null) },
+          { kind: 'external', role: 'dealer' },
+          { kind: 'external', role: 'dealer' },
+          { kind: 'external', role: 'dealer' },
+        ],
+        dealerAvgCP: null,
+        tier: 'unknown',
+      },
+    ],
+  };
+  const friendsOnly: Candidate = {
+    summary: { friendCount: 2, characterCount: 4, partyCount: 1, externalCount: 0, externalSupports: 0, externalDealers: 0 },
+    imbalance: 0,
+    parties: [{
+      slots: [
+        { kind: 'friend', friendId: 'f1', character: ch('가나서폿', 'support', null) },
+        { kind: 'friend', friendId: 'f2', character: ch('다라', 'dealer', 2100) },
       ],
-    };
-    planResult = { candidates: [candidate], excluded: [] };
+      dealerAvgCP: 2100,
+      tier: 'tight',
+    }],
+  };
+
+  it('추천 카드: "추천 N"(첫 번째에 ⭐), 요약 한 줄, 공대가 카드 안에 1공대·2공대 순서로 쌓인다', async () => {
+    planResult = { candidates: [multiRun, friendsOnly], excluded: [] };
     await renderLoaded();
     fireEvent.click(screen.getByRole('checkbox', { name: '세르카 노말' }));
-    const card = await screen.findByRole('article', { name: /3\+2/ });
-    const avgs = within(card).getAllByText(/^[\d,—]+$/, { selector: '.party__avg-value' }).map((e) => e.textContent);
-    expect(avgs).toEqual(['2,450', '2,100']);
-    expect(within(card).getByText('여유')).toBeInTheDocument();
-    expect(within(card).getByText('빠듯함')).toBeInTheDocument();
-    expect(within(card).getByText(/외부 3명 필요/)).toBeInTheDocument();
-    expect(within(card).getAllByText('외부 서포터')).toHaveLength(2);
-    expect(within(card).getByText('외부 딜러')).toBeInTheDocument();
-    expect(within(card).getByText('영준')).toBeInTheDocument();
+    const first = await screen.findByRole('article', { name: /추천 1/ });
+    const second = screen.getByRole('article', { name: /추천 2/ });
+    expect(within(first).getByRole('heading', { level: 4 })).toHaveTextContent('⭐추천 1');
+    expect(within(second).getByRole('heading', { level: 4 })).toHaveTextContent(/^추천 2$/);
+    expect(within(first).getByText('친구 2명 · 캐릭터 3개 · 공대 2개 · 외부 5명 필요 (서포터 1, 딜러 4)')).toBeInTheDocument();
+    expect(within(second).getByText('친구 2명 · 캐릭터 4개 · 공대 1개 · 친구들만으로 구성 가능')).toBeInTheDocument();
+    // 공대는 카드 안에 1공대, 2공대 순서로
+    const parties = within(first).getAllByRole('region').map((r) => r.getAttribute('aria-label'));
+    expect(parties).toEqual(['1공대', '2공대']);
+    const avgs = within(first).getAllByText(/^[\d,—]+$/, { selector: '.party__avg-value' }).map((e) => e.textContent);
+    expect(avgs).toEqual(['2,275', '—']);
+    expect(within(first).getByText('여유')).toBeInTheDocument();
+    expect(within(first).getByText('모름')).toBeInTheDocument();
+    expect(within(first).getAllByText('외부 서포터')).toHaveLength(1);
+    expect(within(first).getAllByText('외부 딜러')).toHaveLength(4);
+    // 같은 친구(영준)가 두 공대에 다른 캐릭터로 나온다
+    const [p1, p2] = within(first).getAllByRole('region');
+    expect(within(p1).getByText('영준')).toBeInTheDocument();
+    expect(within(p1).getByText('가나')).toBeInTheDocument();
+    expect(within(p2).getByText('영준')).toBeInTheDocument();
+    expect(within(p2).getByText('가나서폿')).toBeInTheDocument();
+    expect(within(first).getByText('공대 간 딜러 평균 차이 350')).toBeInTheDocument();
+    // "분배"라는 말은 어디에도 없다
+    expect(document.body.textContent).not.toMatch(/분배/);
   });
 
   it('excluded가 있으면 "가능한 캐릭터 없음" 안내가 보인다', async () => {
@@ -336,15 +367,15 @@ describe('웹 화면', () => {
 
   it('여러 레이드를 고르면 후보 카드 제목 id가 겹치지 않는다', async () => {
     planResult = {
-      candidates: [{ label: '2', externalCount: 6, imbalance: 0, parties: [{ slots: [], dealerAvgCP: null, tier: 'unknown' }] }],
+      candidates: [friendsOnly, multiRun],
       excluded: [],
     };
     await renderLoaded();
     fireEvent.click(screen.getByRole('checkbox', { name: '세르카 노말' }));
     fireEvent.click(screen.getByRole('checkbox', { name: '벨가르딘 노말' }));
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(4));
     const ids = screen.getAllByRole('article').map((a) => a.getAttribute('aria-labelledby')!);
-    expect(new Set(ids).size).toBe(2);
+    expect(new Set(ids).size).toBe(4);
     for (const a of screen.getAllByRole('article')) {
       const id = a.getAttribute('aria-labelledby')!;
       expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);

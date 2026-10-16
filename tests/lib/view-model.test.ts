@@ -4,7 +4,7 @@ import {
   RAID_GROUPS,
   RAID_NAMES,
   clearValue,
-  externalSummary,
+  planSummaryText,
   formatCP,
   recordsAfterChange,
   TIER_META,
@@ -69,10 +69,14 @@ describe('formatting helpers', () => {
     expect(formatCP(2450.4)).toBe('2,450');
     expect(formatCP(null)).toBe('—');
   });
-  it('summarises external slots by role', () => {
-    expect(externalSummary(0, 0)).toBe('외부 인원 없이 가능');
-    expect(externalSummary(1, 2)).toBe('외부 3명 필요 (서포터 1, 딜러 2)');
-    expect(externalSummary(1, 0)).toBe('외부 1명 필요 (서포터 1)');
+  it('summarises a recommendation in one line (외부 0이면 친구들만으로 구성 가능)', () => {
+    const base = { friendCount: 2, characterCount: 3, partyCount: 2 };
+    expect(planSummaryText({ ...base, externalCount: 5, externalSupports: 2, externalDealers: 3 }))
+      .toBe('친구 2명 · 캐릭터 3개 · 공대 2개 · 외부 5명 필요 (서포터 2, 딜러 3)');
+    expect(planSummaryText({ ...base, externalCount: 1, externalSupports: 0, externalDealers: 1 }))
+      .toBe('친구 2명 · 캐릭터 3개 · 공대 2개 · 외부 1명 필요 (서포터 0, 딜러 1)');
+    expect(planSummaryText({ ...base, externalCount: 0, externalSupports: 0, externalDealers: 0 }))
+      .toBe('친구 2명 · 캐릭터 3개 · 공대 2개 · 친구들만으로 구성 가능');
   });
   it('has a Korean label and an icon for every tier', () => {
     expect(TIER_META.comfortable.label).toBe('여유');
