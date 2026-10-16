@@ -39,6 +39,10 @@ function PartyBlock({ party, index, rank, names, size }: { party: Party; index: 
         </span>
         <TierBadge tier={party.tier} />
       </header>
+      <div className="members__cols">
+        <span className="members__col members__col--level">레벨</span>
+        <span className="members__col members__col--cp">전투력</span>
+      </div>
       {blocks.map((block, b) => (
         <Fragment key={b}>
           {b > 0 && <hr className="members__divider" />}
@@ -53,7 +57,7 @@ function PartyBlock({ party, index, rank, names, size }: { party: Party; index: 
   );
 }
 
-/** 추천 하나 = 완성된 편성. 요약 한 줄 아래에 1공대, 2공대, …를 세로로 쌓는다. */
+/** 추천 하나 = 완성된 편성. 요약 한 줄 아래에 1공대, 2공대, …를 반응형 그리드(넓으면 2~3열, 좁으면 1열)로 놓는다. */
 export function CandidateCard({
   candidate,
   rank,
@@ -85,7 +89,7 @@ export function CandidateCard({
           {planSummaryText(candidate.summary)}
         </p>
       </header>
-      <div className="candidate__parties">
+      <div className="candidate__parties" role="group" aria-label={`추천 ${rank + 1} 공대 목록`}>
         {candidate.parties.map((p, i) => (
           <PartyBlock key={i} party={p} index={i} rank={rank} names={names} size={size} />
         ))}
