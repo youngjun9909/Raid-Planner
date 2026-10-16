@@ -31,6 +31,10 @@ describe('detectRole', () => {
     expect(detectRole('도화가', [])).toBe('support');
     expect(detectRole('버서커', [])).toBe('dealer');
   });
+  it('발키리는 support (사용자 확인: 서포터 직업은 홀리나이트, 도화가, 바드, 발키리)', () => {
+    expect(detectRole('발키리', [])).toBe('support');
+    for (const c of ['홀리나이트', '도화가', '바드']) expect(detectRole(c, [])).toBe('support');
+  });
   it('알 수 없는 직업은 dealer', () => expect(detectRole('???', ['x'])).toBe('dealer'));
 });
 

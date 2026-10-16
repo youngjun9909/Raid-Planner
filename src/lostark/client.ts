@@ -12,8 +12,9 @@
  *  4. Engraving names (for detectRole) may live under ArkPassive.Effects[].Name/Description;
  *     exact location unknown, so we collect strings defensively.
  *  5. Rate limit 100 req/min -> sequential profile calls with a gap (default 700ms); 429 aborts.
- *  6. SUPPORT_CLASSES is provisional. TODO(probe): decide whether engravings are needed
- *     to tell supports apart and refine detectRole accordingly.
+ *  6. Role detection is by class: SUPPORT_CLASSES (홀리나이트, 도화가, 바드, 발키리) is
+ *     user-confirmed (2026-10-16). Odd cases use the manual role override (PUT /api/friends/[id]/role).
+ *     Engravings are still collected but not used.
  */
 import type { Character, Role } from '@/core/types';
 import { SUPPORT_CLASSES } from '@/core/raids';
@@ -55,7 +56,7 @@ function parseCombatPower(v: unknown): number | null {
 }
 
 export function detectRole(className: string, engravings: string[]): Role {
-  // TODO(probe): engravings are the hook for refinement; for now the class decides.
+  // 직업으로 판별한다 (서포터 직업 목록은 사용자 확인). engravings는 나중을 위해 받아만 둔다.
   void engravings;
   return SUPPORT_CLASSES.includes(className) ? 'support' : 'dealer';
 }

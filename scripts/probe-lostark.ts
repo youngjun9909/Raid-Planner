@@ -45,6 +45,6 @@ async function main() {
   console.log('(c) 각인 관련 필드 (ArkPassive / Engravings):');
   console.log('    ArkPassive:', JSON.stringify(p.ArkPassive)?.slice(0, 600));
   console.log('    Engravings:', JSON.stringify(p.Engravings)?.slice(0, 600));
-  console.log('서포터 직업 후보와 각인을 대조해 SUPPORT_CLASSES / detectRole을 확정하세요.');
+  console.log('서포터 직업 목록(SUPPORT_CLASSES)은 사용자가 확정했어요. 위 필드 모양과 전투력 값만 fixtures와 비교하세요.');
 }
 main();

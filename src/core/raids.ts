@@ -22,5 +22,5 @@ export function getRaid(id: string): RaidConfig | undefined {
   return RAIDS.find((r) => r.id === id);
 }
 
-// 잠정값: Task 5의 probe 결과로 확정한다.
-export const SUPPORT_CLASSES: string[] = ['바드', '홀리나이트', '도화가'];
+// 서포터 직업은 이 네 개뿐이다 (사용자 확인 2026-10-16). 예외적인 캐릭터는 웹의 수동 역할 지정으로 바꾼다.
+export const SUPPORT_CLASSES: string[] = ['홀리나이트', '도화가', '바드', '발키리'];

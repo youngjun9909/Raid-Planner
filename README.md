@@ -156,4 +156,6 @@ npx tsx scripts/probe-lostark.ts <대표캐릭터>
 ```
 
 3. 출력된 필드(원정대 필드, 전투력 값, 각인/아크패시브 정보)를 `tests/lostark/fixtures` 안의 파일들과 비교해요.
-4. 다르면 fixtures와 `client.ts`의 파싱을, 그리고 서포터 판별 기준인 `SUPPORT_CLASSES`(`src/core/raids.ts`)를 실제 응답에 맞게 고치고 `npm test`로 확인하세요.
+4. 다르면 fixtures와 `client.ts`의 파싱을 실제 응답에 맞게 고치고 `npm test`로 확인하세요. 이 확인은 응답 필드 모양과 전투력 값을 보기 위한 것이에요.
+
+서포터 판별 기준인 `SUPPORT_CLASSES`(`src/core/raids.ts`)는 홀리나이트, 도화가, 바드, 발키리 네 직업으로 확정되어 있어요(직업 이름으로 판별). 예외적인 캐릭터는 웹 화면에서 역할 배지를 눌러 직접 바꾸면 돼요.
