@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createMemoryStore, type Store } from '@/store/store';
 import { handleInteraction, type Deps } from '@/discord/handler';
-import { COMMANDS } from '@/discord/commands';
+import { COMMANDS, registrationPayload } from '@/discord/commands';
 import { LostArkError } from '@/lostark/client';
 import { RAIDS } from '@/core/raids';
 import { weekKey } from '@/core/week';
@@ -43,8 +43,20 @@ const content = (r: { response: any }) => r.response.data?.content as string;
 const all = (r: { response: any }) => JSON.stringify(r.response.data);
 
 describe('COMMANDS', () => {
-  it('명령어, 등록, 공대, 클리어, 현황, 웹', () => {
-    expect(COMMANDS.map((c) => c.name).sort()).toEqual(['공대', '등록', '명령어', '클리어', '현황', '웹'].sort());
+  it('명령어, 등록, 공대, 클리어, 현황, 웹, 숙련도', () => {
+    expect(COMMANDS.map((c) => c.name).sort()).toEqual(['공대', '등록', '명령어', '클리어', '현황', '웹', '숙련도'].sort());
+  });
+  it('/숙련도: 캐릭터(자동완성), 레이드(레이드 이름 6개), 숙련도(숙련/반숙/클경) 옵션이 모두 필수', () => {
+    const c = COMMANDS.find((x) => x.name === '숙련도')!;
+    expect(c.options!.map((o) => [o.name, o.type, o.required])).toEqual([['캐릭터', 3, true], ['레이드', 3, true], ['숙련도', 3, true]]);
+    expect(c.options![0].autocomplete).toBe(true);
+    expect(c.options![0].choices).toBeUndefined();
+    expect(c.options![1].choices!.map((x) => x.value)).toEqual([...new Set(RAIDS.map((r) => r.name))]);
+    expect(c.options![1].choices!.length).toBeLessThanOrEqual(25);
+    expect(c.options![2].choices!.map((x) => x.value)).toEqual(['숙련', '반숙', '클경']);
+    const reg = registrationPayload().find((x) => x.name === '숙련도')!;
+    expect(reg.options![0]).toMatchObject({ name: '캐릭터', autocomplete: true });
+    expect(reg).not.toHaveProperty('group');
   });
   it('모든 COMMANDS에 비어 있지 않은 한글 description이 있다', () => {
     const hangul = /[가-힣]/;
@@ -444,5 +456,95 @@ describe('handleInteraction', () => {
     expect(saved.response.data!.embeds![0].description).toBe('✅ 세르카 하드');
     const raidSelect = saved.response.data!.components![1].components[0] as { options: { value: string; default?: boolean }[] };
     expect(raidSelect.options.find((o) => o.value === 'serka-hard')!.default).toBe(true);
+  });
+});
+
+describe('/숙련도', () => {
+  beforeEach(async () => { await store.saveFriend(friendA); await store.saveFriend(friendB); });
+  const prof = (character: unknown, raid: unknown, level: unknown, userId = 'u1') =>
+    cmd('숙련도', [{ name: '캐릭터', value: character }, { name: '레이드', value: raid }, { name: '숙련도', value: level }], userId);
+  const auto = (value: string, userId = 'u1', focused = '캐릭터') => ({
+    type: 4, id: 'i3', application_id: 'app1', token: 'tok-secret', ...user(userId),
+    data: {
+      name: '숙련도',
+      options: [
+        { name: '캐릭터', type: 3, value, focused: focused === '캐릭터' },
+        { name: '레이드', type: 3, value: '세르카', focused: focused === '레이드' },
+      ],
+    },
+  });
+
+  it('내 캐릭터의 레이드 숙련도를 저장하고 본인에게만 짧게 확인해 준다', async () => {
+    const r = await run(prof('A1', '세르카', '숙련'));
+    expect(r.response.type).toBe(4);
+    expect(r.response.data!.flags).toBe(64);
+    expect((await store.getFriend('fa'))!.proficiency).toEqual({ 'A1|세르카': '숙련' });
+    const e = r.response.data!.embeds![0];
+    expect(e.title).toContain('A1 · 세르카 → 숙련');
+    expect(e.description).toContain('●숙련');
+    expect(content(r)).toContain('A1 · 세르카 → 숙련');
+    await run(prof(' A2-sup ', '벨가르딘', '클경'));
+    expect((await store.getFriend('fa'))!.proficiency).toEqual({ 'A1|세르카': '숙련', 'A2-sup|벨가르딘': '클경' });
+  });
+
+  it('저장한 숙련도는 /공대 추천에 반영된다 (구성원 줄 배지)', async () => {
+    await run(prof('A1', '세르카', '숙련'));
+    const r = await run(cmd('공대', [{ name: '레이드', value: 'serka-hard' }]));
+    expect(all(r)).toContain('**A1** ●숙련');
+    expect(all(r)).toContain('**B1** ◐반숙');
+  });
+
+  it('등록 안 한 사용자는 /등록 안내, 다른 친구의 캐릭터는 바꿀 수 없다', async () => {
+    const stranger = await run(prof('A1', '세르카', '숙련', 'stranger'));
+    expect(stranger.response.data!.flags).toBe(64);
+    expect(content(stranger)).toContain('/등록');
+    const other = await run(prof('B1', '세르카', '숙련', 'u1'));
+    expect(other.response.data!.flags).toBe(64);
+    expect(content(other)).toContain('내 캐릭터만 바꿀 수 있어요');
+    expect((await store.getFriend('fb'))!.proficiency).toBeUndefined();
+  });
+
+  it('없는 캐릭터/레이드/숙련도는 친절한 안내 (저장하지 않음)', async () => {
+    const noChar = await run(prof('없는캐릭', '세르카', '숙련'));
+    expect(noChar.response.data!.flags).toBe(64);
+    expect(content(noChar)).toContain('내 원정대에 없는 캐릭터예요');
+    expect(content(await run(prof('A1', '없는레이드', '숙련')))).toContain('알 수 없는 레이드예요');
+    expect(content(await run(prof('A1', 'serka-hard', '숙련')))).toContain('알 수 없는 레이드예요');
+    expect(content(await run(prof('A1', '세르카', '고수')))).toContain('숙련, 반숙, 클경 중에서 골라 주세요');
+    expect(content(await run(prof('', '세르카', '숙련')))).toContain('캐릭터');
+    expect((await store.getFriend('fa'))!.proficiency).toBeUndefined();
+  });
+
+  it('/명령어 도움말에 /숙련도가 나온다', async () => {
+    expect(all(await run(cmd('명령어')))).toContain('/숙련도');
+  });
+
+  describe('캐릭터 자동완성 (interaction type 4 → 응답 type 8)', () => {
+    it('내 캐릭터만, 입력한 글자로 걸러서 (레벨 높은 순)', async () => {
+      const r = await run(auto(''));
+      expect(r.response.type).toBe(8);
+      expect(r.response.data!.choices!.map((c) => c.value)).toEqual(['A1', 'A2-sup']);
+      expect(r.response.data!.choices![0].name).toContain('A1');
+      expect(r.response.data).not.toHaveProperty('flags');
+      const filtered = await run(auto('SUP'));
+      expect(filtered.response.data!.choices!.map((c) => c.value)).toEqual(['A2-sup']);
+    });
+
+    it('캐릭터가 많아도 25개까지', async () => {
+      await store.saveFriend({ ...friendA, characters: Array.from({ length: 30 }, (_, i) => ch('C' + i, 'dealer', 3000, 1700 + i)) });
+      const r = await run(auto(''));
+      expect(r.response.data!.choices).toHaveLength(25);
+      expect(r.response.data!.choices![0].value).toBe('C29');
+    });
+
+    it('등록 안 한 사용자나 다른 옵션의 자동완성은 빈 목록', async () => {
+      expect((await run(auto('', 'stranger'))).response).toEqual({ type: 8, data: { choices: [] } });
+      expect((await run(auto('', 'u1', '레이드'))).response).toEqual({ type: 8, data: { choices: [] } });
+    });
+
+    it('저장소 오류에도 자동완성 응답 형식(type 8)을 지킨다', async () => {
+      deps.store = { ...store, listFriends: async () => { throw new Error('down'); } };
+      expect((await run(auto(''))).response).toEqual({ type: 8, data: { choices: [] } });
+    });
   });
 });

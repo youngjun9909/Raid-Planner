@@ -1,4 +1,5 @@
 import { RAIDS } from '@/core/raids';
+import { PROFICIENCIES, RAID_NAMES_FOR_PROFICIENCY } from '@/core/proficiency';
 import type { RaidConfig } from '@/core/types';
 
 /** 슬래시 명령어 옵션 타입 (Discord ApplicationCommandOptionType). */
@@ -10,6 +11,8 @@ export interface CommandOption {
   description: string;
   required?: boolean;
   choices?: { name: string; value: string }[];
+  /** 입력하는 동안 봇에게 선택지를 물어본다 (interaction type 4). choices와 함께 쓰지 않는다. */
+  autocomplete?: boolean;
 }
 
 export interface CommandDef {
@@ -52,6 +55,29 @@ export const COMMANDS: CommandDef[] = [
       required: true,
       choices: RAIDS.map((r) => ({ name: raidTitle(r), value: r.id })),
     }],
+  },
+  {
+    name: '숙련도',
+    description: '내 캐릭터의 레이드별 숙련도(숙련·반숙·클경)를 정해요. 공대 추천에 반영돼요',
+    group: '공대 짜기',
+    example: '/숙련도 캐릭터:홍길동 레이드:세르카 숙련도:숙련',
+    options: [
+      { type: STRING, name: '캐릭터', description: '내 캐릭터 이름 (입력하면 내 캐릭터 목록이 떠요)', required: true, autocomplete: true },
+      {
+        type: STRING,
+        name: '레이드',
+        description: '레이드 이름 (난이도와 상관없이 같은 숙련도예요)',
+        required: true,
+        choices: RAID_NAMES_FOR_PROFICIENCY.map((n) => ({ name: n, value: n })),
+      },
+      {
+        type: STRING,
+        name: '숙련도',
+        description: '숙련(익숙함) · 반숙(보통, 기본값) · 클경(클리어 경험만)',
+        required: true,
+        choices: PROFICIENCIES.map((p) => ({ name: p, value: p })),
+      },
+    ],
   },
   {
     name: '클리어',

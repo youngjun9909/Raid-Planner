@@ -3,7 +3,7 @@ import type { Store } from '@/store/store';
 import { LostArkError, type LostArkErrorCode, type fetchRoster as FetchRoster } from '@/lostark/client';
 import { getRaid, RAIDS } from '@/core/raids';
 import { planRaid } from '@/core/planner';
-import { proficiencyLookup } from '@/core/proficiency';
+import { isProficiency, proficiencyLookup, RAID_NAMES_FOR_PROFICIENCY } from '@/core/proficiency';
 import { weekKey } from '@/core/week';
 import type { Character, ClearRecord, Friend, RaidConfig } from '@/core/types';
 import { applyClearChange, formatLevel } from '@/lib/view-model';
@@ -11,7 +11,7 @@ import { getWebUrl } from '@/lib/web-url';
 import { findOwner } from '@/lib/friend-dupes';
 import { COMMANDS, raidTitle } from './commands';
 import {
-  characterClearsEmbed, errorParts, formatHelp, formatPlan, formatStatus, registerSuccess,
+  characterClearsEmbed, errorParts, formatHelp, formatPlan, formatStatus, proficiencySaved, registerSuccess,
   NO_FRIENDS_TEXT, webLinkParts, type MessageParts,
 } from './format';
 import { ICON } from './theme';
@@ -50,6 +50,10 @@ const FIX = {
   noCharacters: '`/등록`을 다시 실행해서 원정대를 새로 불러와 주세요.',
   unknownRaid: '`/공대`에서 목록에 있는 레이드를 골라 주세요.',
   rerun: '`/클리어`를 다시 실행해서 최신 메뉴로 골라 주세요.',
+  profCharacter: '`/숙련도`에서 캐릭터 칸에 글자를 넣으면 뜨는 내 캐릭터 목록에서 골라 주세요.',
+  profNotMine: '내 캐릭터의 숙련도만 바꿀 수 있어요. 캐릭터 칸의 목록에서 골라 주세요.',
+  profRaid: '`/숙련도`의 레이드 목록에서 골라 주세요.',
+  profLevel: '`/숙련도`의 숙련도 목록(숙련 · 반숙 · 클경)에서 골라 주세요.',
 };
 const LOSTARK_FIX: Record<LostArkErrorCode, string> = {
   not_found: '캐릭터 이름의 철자를 확인하고 다시 `/등록` 해 주세요.',
@@ -84,11 +88,14 @@ export async function handleInteraction(body: DiscordInteraction, deps: Deps): P
       case InteractionType.PING: return only({ type: ResponseType.PONG });
       case InteractionType.APPLICATION_COMMAND: return await onCommand(body, deps, fail);
       case InteractionType.MESSAGE_COMPONENT: return await onComponent(body, deps, fail);
+      case InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE: return only(await onAutocomplete(body, deps));
       default: return fail(UNKNOWN_TEXT, FIX.unknown);
     }
   } catch (err) {
     // 오류 내용에는 토큰 등 민감한 값이 섞일 수 있어 이름만 남긴다.
     console.error('discord interaction failed:', err instanceof Error ? err.name : typeof err);
+    // 자동완성에는 메시지로 답할 수 없다: 빈 선택지로 답한다.
+    if (body?.type === InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE) return only(NO_CHOICES);
     try {
       return fail(GENERIC_ERROR_TEXT, FIX.generic);
     } catch {
@@ -108,6 +115,7 @@ async function onCommand(body: DiscordInteraction, deps: Deps, fail: Fail): Prom
       return raid ? planFor(raid, deps, reply, fail) : fail('알 수 없는 레이드예요', FIX.unknownRaid);
     }
     case '클리어': return onClearStart(body, deps, fail);
+    case '숙련도': return onProficiency(body, deps, fail);
     case '웹': return only(privately(webLinkParts(getWebUrl(), deps.now())));
     case '현황': return only(await onStatus(deps));
     default: return fail(UNKNOWN_TEXT, FIX.unknown);
@@ -193,6 +201,48 @@ async function planFor(raid: RaidConfig, deps: Deps, wrap: (p: MessageParts) => 
 async function onStatus(deps: Deps): Promise<DiscordResponse> {
   const [friends, clears] = await Promise.all([deps.store.listFriends(), deps.store.getClears(weekKey(deps.now()))]);
   return reply(formatStatus(friends, clears, deps.now()));
+}
+
+// ---------- /숙련도 ----------
+//
+// 캐릭터는 자동완성(interaction type 4 → 응답 type 8)으로 실행한 사람의 캐릭터만 보여 준다. 선택 메뉴 단계를 두는 것보다
+// 명령어 한 번으로 끝나서 단순하다. 자동완성 목록 밖의 이름을 직접 쳐도 실행할 때 다시 확인한다 (내 캐릭터만).
+
+const MAX_CHOICES = 25;
+const NO_CHOICES: DiscordResponse = { type: ResponseType.APPLICATION_COMMAND_AUTOCOMPLETE_RESULT, data: { choices: [] } };
+
+async function onAutocomplete(body: DiscordInteraction, deps: Deps): Promise<DiscordResponse> {
+  const focused = body.data?.options?.find((o) => o.focused);
+  if (body.data?.name !== '숙련도' || focused?.name !== '캐릭터') return NO_CHOICES;
+  const me = await findMe(body, deps.store);
+  if (!me) return NO_CHOICES;
+  const typed = String(focused.value ?? '').trim().toLowerCase();
+  const choices = [...me.characters]
+    .filter((c) => c.name.toLowerCase().includes(typed))
+    .sort((a, b) => b.itemLevel - a.itemLevel)
+    .slice(0, MAX_CHOICES)
+    .map((c) => ({ name: clip(`${c.name} · ${c.className} · ${formatLevel(c.itemLevel)}`), value: c.name }));
+  return { type: ResponseType.APPLICATION_COMMAND_AUTOCOMPLETE_RESULT, data: { choices } };
+}
+
+async function onProficiency(body: DiscordInteraction, deps: Deps, fail: Fail): Promise<HandlerResult> {
+  const me = await findMe(body, deps.store);
+  if (!me) return fail('먼저 `/등록`으로 대표 캐릭터를 등록해 주세요', FIX.registerFirst);
+  const name = String(option(body, '캐릭터') ?? '').trim();
+  const raidName = String(option(body, '레이드') ?? '');
+  const level = option(body, '숙련도');
+  if (!name) return fail('캐릭터 이름을 골라 주세요', FIX.profCharacter);
+  const character = me.characters.find((c) => c.name === name);
+  if (!character) {
+    const owner = findOwner(await deps.store.listFriends(), [name], me.id);
+    return owner
+      ? fail('내 캐릭터만 바꿀 수 있어요', FIX.profNotMine)
+      : fail(`내 원정대에 없는 캐릭터예요: ${clip(name, 40)}`, FIX.profCharacter);
+  }
+  if (!RAID_NAMES_FOR_PROFICIENCY.includes(raidName)) return fail('알 수 없는 레이드예요', FIX.profRaid);
+  if (!isProficiency(level)) return fail('숙련도는 숙련, 반숙, 클경 중에서 골라 주세요', FIX.profLevel);
+  await deps.store.setProficiency(me.id, character.name, raidName, level);
+  return only(privately(proficiencySaved(character.name, raidName, level, deps.now())));
 }
 
 // ---------- /클리어 ----------

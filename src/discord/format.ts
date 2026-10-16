@@ -4,11 +4,12 @@
  */
 import { RAIDS } from '@/core/raids';
 import { weekKey } from '@/core/week';
-import type { Candidate, Character, ClearRecord, Friend, Party, PlanResult, RaidConfig, Slot, Tier } from '@/core/types';
+import type { Candidate, Character, ClearRecord, Friend, Party, PlanResult, Proficiency, RaidConfig, Slot, Tier } from '@/core/types';
+import { DEFAULT_PROFICIENCY, NO_EXPERT_TEXT, partyProficiency, proficiencySummaryText } from '@/core/proficiency';
 import { countExternals, formatCP, formatLevel, formatRange, planSummaryText } from '@/lib/view-model';
 import { arrangeParty } from '@/lib/arrange-party';
 import { COMMAND_GROUPS, raidTitle, type CommandDef } from './commands';
-import { BOT_NAME, COLOR, GAUGE, ICON, TIER_BADNESS, TIER_COLOR, TIER_TEXT } from './theme';
+import { BOT_NAME, COLOR, GAUGE, ICON, PROFICIENCY_TEXT, TIER_BADNESS, TIER_COLOR, TIER_TEXT } from './theme';
 import type { ActionRow, Embed, EmbedField } from './types';
 
 export { raidTitle, TIER_TEXT, TIER_COLOR };
@@ -161,9 +162,16 @@ function memberLine(slot: Slot, names: Map<string, string>, detail: Detail = 0):
   const c = slot.character;
   const owner = names.get(slot.friendId) ?? '?';
   const level = detail < 2 ? ` · ${formatLevel(c.itemLevel)}` : '';
+  const prof = PROFICIENCY_TEXT[slot.proficiency ?? DEFAULT_PROFICIENCY];
   return c.role === 'support'
-    ? `${ICON.support} **${c.name}**${level} · ${owner}`
-    : `${ICON.dealer} **${c.name}**${level} · CP ${formatCP(c.combatPower)} · ${owner}`;
+    ? `${ICON.support} **${c.name}** ${prof}${level} · ${owner}`
+    : `${ICON.dealer} **${c.name}** ${prof}${level} · CP ${formatCP(c.combatPower)} · ${owner}`;
+}
+
+/** 공대 칸 제목 뒤에 붙는 숙련도: " · 숙련 1 · 반숙 1 · 클경 0" (+ " · ⚠️ 숙련자 없음"). 외부 자리는 세지 않는다. */
+function proficiencyTitle(p: Party): string {
+  const s = partyProficiency(p);
+  return ` · ${proficiencySummaryText(s)}${s.noExpert ? ` · ${ICON.warn} ${NO_EXPERT_TEXT}` : ''}`;
 }
 
 /** 8인 공대의 두 4인 파티 사이 구분선. */
@@ -192,12 +200,12 @@ function memberLines(p: Party, names: Map<string, string>, detail: Detail, size:
   return lines.flatMap((l, i) => (i > 0 ? [BLOCK_SEPARATOR, ...l] : l));
 }
 
-/** 공대 칸: 이름 "1공대 · 평균 3,900 🟢 여유", 값은 게이지 + 구성원 줄. */
+/** 공대 칸: 이름 "1공대 · 평균 3,900 🟢 여유 · 숙련 1 · 반숙 2 · 클경 0", 값은 게이지 + 구성원 줄. */
 function partyField(p: Party, i: number, raid: RaidConfig, names: Map<string, string>, detail: Detail = 0): EmbedField {
   const avg = p.dealerAvgCP === null ? '정보 없음' : formatCP(p.dealerAvgCP);
   const lines = memberLines(p, names, detail, raid.size);
   return {
-    name: `${i + 1}공대 · 평균 ${avg} ${TIER_TEXT[p.tier]}`,
+    name: `${i + 1}공대 · 평균 ${avg} ${TIER_TEXT[p.tier]}${proficiencyTitle(p)}`,
     value: (detail < 2 ? [`\`${gauge(p.dealerAvgCP, raid.recommendedCP.min)}\``, ...lines] : lines).join('\n'),
   };
 }
@@ -399,6 +407,17 @@ export function registerSuccess(opts: {
     description: `**${displayName}** 님 · ${representativeName} 원정대 캐릭터 ${characters.length}개를 불러왔어요\n`
       + `${ICON.support} 서포터 ${supports.length} · ${ICON.dealer} 딜러 ${dealers.length}`,
     fields,
+  })]);
+}
+
+/** /숙련도 저장 확인: "A1 · 세르카 → 숙련" 한 줄과 짧은 설명. */
+export function proficiencySaved(characterName: string, raidName: string, level: Proficiency, now: Date): MessageParts {
+  const line = `${characterName} · ${raidName} → ${level}`;
+  return parts(`${ICON.proficiency} ${line}`, [frame(now, `${ICON.proficiency} 숙련도`, {
+    title: `${ICON.proficiency} ${line}`,
+    color: COLOR.success,
+    description: `**${characterName}** · ${raidName} → ${PROFICIENCY_TEXT[level]}\n`
+      + '공대 추천에서 숙련자는 공대마다 고르게, 클경은 나눠서 넣어요. (정하지 않은 레이드는 반숙)',
   })]);
 }
 

@@ -27,11 +27,13 @@ describe('프로덕션에서 저장소 env가 없으면', () => {
     const clears = await import('@/app/api/clears/route');
     const plan = await import('@/app/api/plan/route');
     const cp = await import('@/app/api/friends/[id]/combat-power/route');
+    const prof = await import('@/app/api/friends/[id]/proficiency/route');
     const params = { params: Promise.resolve({ id: 'a' }) };
     for (const res of [
       await clears.GET(req('/api/clears')),
       await plan.POST(req('/api/plan', 'POST', { raidId: 'serka-hard', attendeeIds: [] })),
       await cp.PUT(req('/api/friends/a/combat-power', 'PUT', { characterName: 'x', cp: 1 }), params),
+      await prof.PUT(req('/api/friends/a/proficiency', 'PUT', { characterName: 'x', raidName: '세르카', level: '숙련' }), params),
     ]) {
       expect(res.status).toBe(503);
       expect((await res.json()).error).toBe(STORE_MSG);
@@ -69,6 +71,12 @@ describe('프로덕션에서 저장소 env가 없으면', () => {
       expect(json.type).toBe(4);
       expect(json.data.flags).toBe(64);
       expect(JSON.stringify(json)).toContain(STORE_MSG);
+    });
+
+    it('자동완성은 저장소 없이 빈 선택지(type 8)로 답한다', async () => {
+      const { POST } = await import('@/app/api/discord/route');
+      const res = await POST(signed({ type: 4, token: 't', application_id: 'app', member: { user: { id: 'u' } }, data: { name: '숙련도', options: [] } }));
+      expect(await res.json()).toEqual({ type: 8, data: { choices: [] } });
     });
 
     it('PING은 저장소 없이도 PONG', async () => {

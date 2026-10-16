@@ -30,6 +30,10 @@ export async function POST(req: Request) {
     if (!(err instanceof StoreConfigError)) throw err;
     // PING은 저장소 없이 답할 수 있다. 나머지는 실행한 사람에게만 설정 안내를 보여 준다.
     if (body?.type === InteractionType.PING) return Response.json({ type: ResponseType.PONG });
+    // 자동완성은 메시지로 답할 수 없어 빈 선택지로 답한다.
+    if (body?.type === InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE) {
+      return Response.json({ type: ResponseType.APPLICATION_COMMAND_AUTOCOMPLETE_RESULT, data: { choices: [] } });
+    }
     return Response.json({ type: ResponseType.CHANNEL_MESSAGE, data: { content: `⚠️ ${err.message}`, flags: EPHEMERAL } });
   }
   const { response, after: work } = await handleInteraction(body, { store, fetchRoster, now: () => new Date() });

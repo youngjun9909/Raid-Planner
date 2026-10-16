@@ -1,4 +1,4 @@
-import type { Tier } from '@/core/types';
+import type { Proficiency, Tier } from '@/core/types';
 
 /** 디스코드 메시지의 시각 체계: 아이콘과 색은 여기서만 정의한다. */
 
@@ -19,7 +19,12 @@ export const ICON = {
   refresh: '🔄',
   empty: '💤',
   web: '🌐',
+  proficiency: '🎯',
+  warn: '⚠️',
 } as const;
+
+/** 숙련도 배지: 모양(꽉 찬 원 / 반 찬 원 / 빈 원) + 글자. 웹과 같은 모양을 쓴다. */
+export const PROFICIENCY_TEXT: Record<Proficiency, string> = { 숙련: '●숙련', 반숙: '◐반숙', 클경: '○클경' };
 
 export const COLOR = {
   comfortable: 0x57f287,

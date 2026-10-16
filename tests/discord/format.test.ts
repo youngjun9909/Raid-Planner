@@ -110,18 +110,18 @@ describe('formatPlan', () => {
   const summary = (s: Partial<Candidate['summary']>): Candidate['summary'] => ({
     friendCount: 2, characterCount: 3, partyCount: 2, externalCount: 5, externalSupports: 1, externalDealers: 4, ...s,
   });
-  // 추천 1: 철수가 A1로 1공대, A2로 2공대 / 영희는 1공대
+  // 추천 1: 철수가 A1(숙련)로 1공대, A2(클경)로 2공대 / 영희는 1공대 (숙련도 없음 = 반숙)
   const first: Candidate = {
     summary: summary({}), imbalance: 800,
     parties: [
       party('comfortable', 3800, [
-        { kind: 'friend', friendId: 'a', character: friends[0].characters[0] },
+        { kind: 'friend', friendId: 'a', character: friends[0].characters[0], proficiency: '숙련' },
         { kind: 'friend', friendId: 'b', character: friends[1].characters[0] },
         { kind: 'external', role: 'dealer' },
         { kind: 'external', role: 'dealer' },
       ]),
       party('risky', 3000, [
-        { kind: 'friend', friendId: 'a', character: friends[0].characters[1] },
+        { kind: 'friend', friendId: 'a', character: friends[0].characters[1], proficiency: '클경' },
         { kind: 'external', role: 'support' },
         { kind: 'external', role: 'dealer' },
         { kind: 'external', role: 'dealer' },
@@ -161,17 +161,20 @@ describe('formatPlan', () => {
     expect(e1.description).toContain('민수 (가능한 캐릭터 없음)');
     expect(e2.description).not.toContain('민수');
     // 공대 둘 사이에 빈칸 칸
-    expect(e1.fields!.map((f) => f.name)).toEqual(['1공대 · 평균 3,800 🟢 여유', '​', '2공대 · 평균 3,000 🔴 위험']);
-    expect(e2.fields![0].name).toBe('1공대 · 평균 정보 없음 ⚪ 모름');
+    // 공대 칸 제목에 숙련도 요약, 숙련자가 없으면 경고
+    expect(e1.fields!.map((f) => f.name)).toEqual([
+      '1공대 · 평균 3,800 🟢 여유 · 숙련 1 · 반숙 1 · 클경 0', '​', '2공대 · 평균 3,000 🔴 위험 · 숙련 0 · 반숙 0 · 클경 1 · ⚠️ 숙련자 없음',
+    ]);
+    expect(e2.fields![0].name).toBe('1공대 · 평균 정보 없음 ⚪ 모름 · 숙련 0 · 반숙 1 · 클경 0 · ⚠️ 숙련자 없음');
     const lines = e1.fields![0].value.split('\n');
     expect(lines[0]).toBe('`▰▰▰▰▰▰▰▰▰▰ 106%`');
-    expect(lines[1]).toBe('⚔️ **A1** · 1745 · CP 3,800 · 철수');
+    expect(lines[1]).toBe('⚔️ **A1** ●숙련 · 1745 · CP 3,800 · 철수');
     // 딜러 먼저(친구 → 외부), 서포터는 맨 아래
     expect(lines[2]).toBe('➕ 외부 딜러 구하기');
     expect(lines[3]).toBe('➕ 외부 딜러 구하기');
-    expect(lines[4]).toBe('🛡️ **B1** · 1740 · 영희');
+    expect(lines[4]).toBe('🛡️ **B1** ◐반숙 · 1740 · 영희');
     // 같은 친구(철수)가 2공대에 다른 캐릭터로
-    expect(e1.fields![2].value).toContain('⚔️ **A2** · 1740 · CP 3,000 · 철수');
+    expect(e1.fields![2].value).toContain('⚔️ **A2** ○클경 · 1740 · CP 3,000 · 철수');
     expect(e1.fields![2].value).toContain('➕ 외부 서포터 구하기');
     expect(e1.footer!.text).toContain('외부 5명 필요 (서포터 1, 딜러 4)');
     expect(e1.footer!.text).toContain('🗓️ 이번 주: 2026-10-14 수요일 06:00 초기화');
