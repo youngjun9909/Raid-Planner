@@ -215,7 +215,7 @@ function candidateEmbed(c: Candidate, i: number, raid: RaidConfig, names: Map<st
     ...(i === 0 && excluded ? [excluded] : []),
   ].join('\n');
   return frame(now, `${ICON.party} 공대 후보`, {
-    title: `${i === 0 ? `${ICON.star} 추천 · ` : `후보 ${i + 1} · `}${raidTitle(raid)} · ${c.label}`,
+    title: `${i === 0 ? `${ICON.star} 추천 · ` : `후보 ${i + 1} · `}${raidTitle(raid)}`,
     color: TIER_COLOR[worstTier(c.parties)],
     description,
     fields,

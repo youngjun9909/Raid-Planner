@@ -63,8 +63,7 @@ export function CandidateCard({
     <article className="candidate" aria-labelledby={titleId}>
       <header className="candidate__head">
         <h4 id={titleId} className="candidate__label">
-          <span className="candidate__split">{candidate.label}</span>
-          <span className="candidate__split-word">분배</span>
+          추천 {rank + 1}
         </h4>
         {rank === 0 && <span className="candidate__pick">추천</span>}
       </header>
@@ -73,7 +72,7 @@ export function CandidateCard({
           <PartyBlock key={i} party={p} index={i} names={names} />
         ))}
       </div>
-      <footer className={`candidate__foot${candidate.externalCount ? '' : ' candidate__foot--none'}`}>
+      <footer className={`candidate__foot${candidate.summary.externalCount ? '' : ' candidate__foot--none'}`}>
         {externalSummary(ext.support, ext.dealer)}
         {candidate.parties.length > 1 && candidate.imbalance > 0 && (
           <span className="muted"> (공대 간 평균 차이 {formatCP(candidate.imbalance)})</span>
