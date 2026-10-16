@@ -1284,7 +1284,7 @@ select {
 }
 
 .roster .select--prof {
-  min-height: 32px;
+  min-height: 36px;
   padding: 4px var(--s2);
   font-size: var(--fs-xs);
 }
