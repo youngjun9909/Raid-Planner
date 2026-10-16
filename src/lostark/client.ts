@@ -1,23 +1,18 @@
 /**
  * Lost Ark Open API client.
  *
- * UNVERIFIED ASSUMPTIONS (built from documented shapes, no real token was used;
- * run `npx tsx scripts/probe-lostark.ts <대표캐릭터>` and correct as needed):
- *  1. Base URL https://developer-lostark.game.onstove.com, header `authorization: bearer <JWT>`.
- *  2. GET /characters/{name}/siblings returns a JSON array of
- *     { ServerName, CharacterName, CharacterClassName, ItemAvgLevel: "1,620.00", ... };
- *     unknown name -> 404, or null/[] body. The list spans every server of the account; we keep
- *     only the representative's ServerName (UNVERIFIED: skipped when ServerName is absent or the
- *     representative is not in the list).
- *  3. GET /armories/characters/{name}/profiles returns an object with
- *     CombatPower as a string ("3,150.25") or null; may be absent -> combatPower null.
- *  4. Engraving names (for detectRole) may live under ArkPassive.Effects[].Name/Description;
- *     exact location unknown, so we collect strings defensively.
- *  5. Rate limit 100 req/min -> sequential profile calls with a gap (default 700ms); 429 aborts.
- *     Characters below the lowest raid minLevel get no profile call (combatPower null).
- *  6. Role detection is by class: SUPPORT_CLASSES (홀리나이트, 도화가, 바드, 발키리) is
- *     user-confirmed (2026-10-16). Odd cases use the manual role override (PUT /api/friends/[id]/role).
- *     Engravings are still collected but not used.
+ * API 응답 모양은 2026-10-16에 실제 토큰으로 확인했어요 (scripts/probe-lostark.ts):
+ *  - 원정대(siblings) 필드: ServerName, CharacterName, CharacterLevel, CharacterClassName, ItemAvgLevel.
+ *  - 프로필(profiles)에는 CombatPower가 문자열("1,432.06")로 있어요. 프로필 응답에는 ArkPassive/Engravings가 없었어요.
+ *  - 인증 헤더는 `authorization: bearer <JWT>`, 기본 주소 https://developer-lostark.game.onstove.com.
+ * 아직 실제로 확인하지 못한 것: 존재하지 않는 캐릭터의 404/빈 응답 모양, 429 응답 모양.
+ *
+ * 동작 요약:
+ *  - 같은 서버 캐릭터만 남겨요 (대표 캐릭터의 ServerName 기준; ServerName이 없으면 거르지 않아요).
+ *  - 분당 100회 제한 때문에 프로필 조회는 순서대로 간격(기본 700ms)을 두고, 429면 중단해요.
+ *    가장 낮은 레이드 입장 레벨보다 낮은 캐릭터는 프로필을 조회하지 않아요 (combatPower null).
+ *  - 역할은 직업 이름으로 판별해요: SUPPORT_CLASSES(홀리나이트, 도화가, 바드, 발키리)는 사용자가 확정했어요 (2026-10-16).
+ *    예외는 수동 역할 지정으로 바꿔요 (PUT /api/friends/[id]/role).
  */
 import type { Character, Role } from '@/core/types';
 import { RAIDS, SUPPORT_CLASSES } from '@/core/raids';

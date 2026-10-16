@@ -1,6 +1,5 @@
 {
-  "_unverified": true,
-  "_note": "Hand-written from documented shapes; replace with probe output.",
+  "_note": "필드 이름과 형식은 2026-10-16 실제 응답(probe)으로 확인함. 값은 가명이며 실제 응답에는 프로필에 ArkPassive가 없었음",
   "data": [
     { "ServerName": "루페온", "CharacterName": "가명버서커", "CharacterLevel": 70, "CharacterClassName": "버서커", "ItemAvgLevel": "1,720.00", "ItemMaxLevel": "1,720.00" },
     { "ServerName": "루페온", "CharacterName": "가명도화가", "CharacterLevel": 70, "CharacterClassName": "도화가", "ItemAvgLevel": "1,710.50", "ItemMaxLevel": "1,710.50" },

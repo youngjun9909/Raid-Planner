@@ -1,1 +1,1 @@
-{ "_unverified": true, "CharacterName": "가명도화가", "CharacterClassName": "도화가", "ItemAvgLevel": "1,590.50", "CombatPower": "2,100.00", "ArkPassive": { "IsArkPassive": true, "Effects": [{ "Name": "깨달음", "Description": "만개" }] } }
+{ "_note": "필드 이름과 형식은 2026-10-16 실제 응답(probe)으로 확인함. 값은 가명이며 실제 응답에는 프로필에 ArkPassive가 없었음", "CharacterName": "가명도화가", "CharacterClassName": "도화가", "ItemAvgLevel": "1,590.50", "CombatPower": "2,100.00", "ArkPassive": { "IsArkPassive": true, "Effects": [{ "Name": "깨달음", "Description": "만개" }] } }

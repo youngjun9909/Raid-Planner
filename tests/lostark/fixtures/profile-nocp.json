@@ -1,1 +1,1 @@
-{ "_unverified": true, "CharacterName": "가명미확인", "CharacterClassName": "미확인직업", "ItemAvgLevel": "0", "CombatPower": null }
+{ "_note": "필드 이름과 형식은 2026-10-16 실제 응답(probe)으로 확인함. 값은 가명이며 실제 응답에는 프로필에 ArkPassive가 없었음", "CharacterName": "가명미확인", "CharacterClassName": "미확인직업", "ItemAvgLevel": "0", "CombatPower": null }
