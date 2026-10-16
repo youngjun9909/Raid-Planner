@@ -1,0 +1,276 @@
+import { describe, it, expect } from 'vitest';
+import {
+  clipLines, clipText, embedSize, errorParts, fitEmbeds, fitMessage, formatHelp, formatPlan, formatStatus, gauge,
+  characterClearsEmbed, registerSuccess, raidTitle, sanitizeEmbed, summaryLine, LIMITS, MAX_CONTENT, TIER_TEXT,
+} from '@/discord/format';
+import { COLOR, ICON, TIER_COLOR } from '@/discord/theme';
+import { COMMANDS } from '@/discord/commands';
+import { getRaid } from '@/core/raids';
+import type { Character, Friend, Party, PlanResult, Slot } from '@/core/types';
+import type { Embed } from '@/discord/types';
+
+const NOW = new Date('2026-10-16T03:00:00Z');
+const ch = (name: string, role: 'dealer' | 'support' = 'dealer', cp: number | null = 3000, itemLevel = 1760): Character =>
+  ({ name, className: '버서커', role, itemLevel, combatPower: cp });
+const fr = (id: string, displayName: string, chars: Character[]): Friend =>
+  ({ id, displayName, representativeName: chars[0].name, characters: chars });
+const serkaHard = getRaid('serka-hard')!; // 권장 3600~4000
+
+/** 디스코드 임베드 제한을 모두 지키는지. */
+function expectValidEmbeds(embeds: Embed[]) {
+  expect(embeds.length).toBeGreaterThan(0);
+  expect(embeds.length).toBeLessThanOrEqual(10);
+  expect(embeds.reduce((s, e) => s + embedSize(e), 0)).toBeLessThanOrEqual(6000);
+  for (const e of embeds) {
+    expect(e.title?.length ?? 0).toBeLessThanOrEqual(256);
+    expect(e.author?.name.length ?? 0).toBeLessThanOrEqual(256);
+    expect(e.description?.length ?? 0).toBeLessThanOrEqual(4096);
+    expect(e.footer?.text.length ?? 0).toBeLessThanOrEqual(2048);
+    expect(e.fields?.length ?? 0).toBeLessThanOrEqual(25);
+    for (const f of e.fields ?? []) {
+      expect(f.name.length).toBeGreaterThan(0);
+      expect(f.name.length).toBeLessThanOrEqual(256);
+      expect(f.value.length).toBeGreaterThan(0);
+      expect(f.value.length).toBeLessThanOrEqual(1024);
+    }
+  }
+}
+
+describe('길이 맞추기', () => {
+  it('MAX_CONTENT는 2000', () => expect(MAX_CONTENT).toBe(2000));
+  it('fitMessage: 짧으면 그대로', () => expect(fitMessage('a\nb')).toBe('a\nb'));
+
+  it('fitMessage: 2000자를 넘으면 줄 단위로 자르고 생략 안내를 붙인다', () => {
+    const lines = Array.from({ length: 300 }, (_, i) => `줄 ${i} ${'가'.repeat(10)}`);
+    const out = fitMessage(lines.join('\n'));
+    expect(out.length).toBeLessThanOrEqual(2000);
+    const outLines = out.split('\n');
+    expect(outLines.pop()).toContain('생략');
+    for (const l of outLines) expect(lines).toContain(l);
+  });
+
+  it('fitMessage/clipLines: 한 줄이 한도보다 길어도 한도를 넘지 않는다', () => {
+    expect(fitMessage('x'.repeat(5000)).length).toBeLessThanOrEqual(2000);
+    expect(clipLines('y'.repeat(3000), 1024).length).toBeLessThanOrEqual(1024);
+  });
+
+  it('clipText는 이모지(서로게이트 쌍)를 깨지 않고 "…"로 끝난다', () => {
+    const out = clipText('🛡️'.repeat(200), 50);
+    expect(out.length).toBeLessThanOrEqual(50);
+    expect(out.endsWith('…')).toBe(true);
+    expect(out).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  });
+
+  it('sanitizeEmbed: 모든 제한을 지키고 빈 필드를 막는다', () => {
+    const e = sanitizeEmbed({
+      author: { name: 'a'.repeat(400) },
+      title: 't'.repeat(400),
+      description: Array.from({ length: 1000 }, () => 'd'.repeat(9)).join('\n'),
+      fields: Array.from({ length: 40 }, (_, i) => ({ name: i === 0 ? '' : 'n'.repeat(300), value: i === 1 ? '' : Array.from({ length: 200 }, () => 'v'.repeat(9)).join('\n') })),
+      footer: { text: 'f'.repeat(3000) },
+    });
+    expectValidEmbeds([e]);
+    expect(e.fields!.length).toBeGreaterThan(0);
+    // 필드 값은 줄 단위로 잘리고 "…"로 끝난다
+    expect(e.fields![0].value.split('\n').slice(0, -1).every((l) => l === 'v'.repeat(9))).toBe(true);
+  });
+
+  it('fitEmbeds: 10개, 합계 6000자를 넘지 않게 뒤쪽 임베드를 뺀다', () => {
+    const big: Embed = { title: 'x', description: 'd'.repeat(2500) };
+    const out = fitEmbeds(Array.from({ length: 12 }, () => big));
+    expectValidEmbeds(out);
+    expect(out).toHaveLength(2);
+    expect(fitEmbeds(Array.from({ length: 12 }, () => ({ title: 'x' })))).toHaveLength(10);
+  });
+});
+
+describe('gauge / summaryLine', () => {
+  it('0% → 빈 막대', () => expect(gauge(0, 3600)).toBe('▱▱▱▱▱▱▱▱▱▱ 0%'));
+  it('100% → 가득', () => expect(gauge(3600, 3600)).toBe('▰▰▰▰▰▰▰▰▰▰ 100%'));
+  it('94%', () => expect(gauge(3384, 3600)).toBe('▰▰▰▰▰▰▰▰▰▱ 94%'));
+  it('100% 초과면 막대는 가득, 숫자는 실제 비율', () => expect(gauge(5400, 3600)).toBe('▰▰▰▰▰▰▰▰▰▰ 150%'));
+  it('null → 정보 없음', () => expect(gauge(null, 3600)).toBe('▱▱▱▱▱▱▱▱▱▱ 정보 없음'));
+  it('summaryLine', () => {
+    expect(summaryLine(3900, serkaHard, 'comfortable')).toBe('평균 전투력 3,900 · 권장 3,600~4,000 · 🟢 여유');
+    expect(summaryLine(null, serkaHard, 'unknown')).toBe('평균 전투력 정보 없음 · 권장 3,600~4,000 · ⚪ 모름');
+  });
+});
+
+describe('theme', () => {
+  it('단계 이모지/색', () => {
+    expect(TIER_TEXT).toEqual({ comfortable: '🟢 여유', tight: '🟡 빠듯함', risky: '🔴 위험', unknown: '⚪ 모름' });
+    expect(TIER_COLOR).toEqual({ comfortable: 0x57f287, tight: 0xfee75c, risky: 0xed4245, unknown: 0x95a5a6 });
+  });
+  it('raidTitle은 "이름 난이도"', () => expect(raidTitle(serkaHard)).toBe('세르카 하드'));
+});
+
+describe('formatPlan', () => {
+  const friends = [fr('a', '철수', [ch('A1', 'dealer', 3800, 1745)]), fr('b', '영희', [ch('B1', 'support', 2500, 1740)])];
+  const party = (tier: Party['tier'], avg: number | null, slots: Slot[]): Party => ({ tier, dealerAvgCP: avg, slots });
+  const result: PlanResult = {
+    candidates: [
+      {
+        label: '2', externalCount: 2, imbalance: 0,
+        parties: [party('comfortable', 3800, [
+          { kind: 'friend', friendId: 'a', character: friends[0].characters[0] },
+          { kind: 'friend', friendId: 'b', character: friends[1].characters[0] },
+          { kind: 'external', role: 'dealer' },
+          { kind: 'external', role: 'support' },
+        ])],
+      },
+      {
+        label: '1+1', externalCount: 6, imbalance: 0,
+        parties: [
+          party('risky', 3000, [{ kind: 'friend', friendId: 'a', character: friends[0].characters[0] }, { kind: 'external', role: 'dealer' }, { kind: 'external', role: 'dealer' }, { kind: 'external', role: 'support' }]),
+          party('comfortable', null, [{ kind: 'friend', friendId: 'b', character: friends[1].characters[0] }, { kind: 'external', role: 'dealer' }, { kind: 'external', role: 'dealer' }, { kind: 'external', role: 'dealer' }]),
+        ],
+      },
+    ],
+    excluded: [{ friendId: 'c', reason: '가능한 캐릭터 없음' }],
+  };
+  const all = [...friends, fr('c', '민수', [ch('C1')])];
+
+  it('후보마다 임베드 하나: 제목, 색(가장 나쁜 단계), 공대별 필드, 꼬리말', () => {
+    const msg = formatPlan(serkaHard, result, all, NOW);
+    expectValidEmbeds(msg.embeds);
+    expect(msg.embeds).toHaveLength(2);
+    const [first, second] = msg.embeds;
+    expect(first.title).toBe('⭐ 추천 · 세르카 하드 · 2');
+    expect(second.title).toBe('후보 2 · 세르카 하드 · 1+1');
+    expect(first.color).toBe(COLOR.comfortable);
+    expect(second.color).toBe(COLOR.risky);
+    expect(first.author!.name).toContain('공대 후보');
+    expect(first.timestamp).toBe(NOW.toISOString());
+    expect(first.description).toContain('평균 전투력 3,800 · 권장 3,600~4,000 · 🟢 여유');
+    expect(first.description).toContain('민수 (가능한 캐릭터 없음)');
+    expect(first.fields).toHaveLength(1);
+    expect(first.fields![0].name).toBe('공대 1 · 🟢 여유');
+    const lines = first.fields![0].value.split('\n');
+    expect(lines[0]).toBe('`▰▰▰▰▰▰▰▰▰▰ 106%`');
+    expect(lines[1]).toBe('⚔️ **A1** · 1745 · CP 3,800 · 철수');
+    expect(lines[2]).toBe('🛡️ **B1** · 1740 · 영희');
+    expect(lines).toContain('➕ 외부 딜러 구하기');
+    expect(lines).toContain('➕ 외부 서포터 구하기');
+    expect(first.footer!.text).toContain('외부 2명 필요 (서포터 1, 딜러 1)');
+    expect(first.footer!.text).toContain('🗓️ 이번 주: 2026-10-14 수요일 06:00 초기화');
+    // 공대가 둘이면 사이에 빈칸 필드
+    expect(second.fields!.map((f) => f.name)).toEqual(['공대 1 · 🔴 위험', '​', '공대 2 · 🟢 여유']);
+    expect(second.fields![2].value.split('\n')[0]).toBe('`▱▱▱▱▱▱▱▱▱▱ 정보 없음`');
+    expect(msg.content).toContain('세르카 하드');
+    expect(msg.content.length).toBeLessThanOrEqual(2000);
+  });
+
+  it('외부 인원이 없으면 "친구들만으로 구성 가능"', () => {
+    const r: PlanResult = { candidates: [{ label: '1', externalCount: 0, imbalance: 0, parties: [party('tight', 3300, [{ kind: 'friend', friendId: 'a', character: friends[0].characters[0] }])] }], excluded: [] };
+    const e = formatPlan(serkaHard, r, friends, NOW).embeds[0];
+    expect(e.footer!.text).toContain('친구들만으로 구성 가능');
+    expect(e.color).toBe(COLOR.tight);
+  });
+
+  it('다시 계산 / 클리어 표시 버튼 (custom_id ≤ 100)', () => {
+    const msg = formatPlan(serkaHard, result, all, NOW);
+    const buttons = msg.components![0].components;
+    expect(buttons.map((b) => b.custom_id)).toEqual(['plan:serka-hard', 'clr:start']);
+    expect(buttons.every((b) => b.type === 2 && b.custom_id.length <= 100)).toBe(true);
+  });
+
+  it('후보가 없으면 회색 임베드 하나에 사유를 문장으로', () => {
+    const msg = formatPlan(serkaHard, { candidates: [], excluded: [{ friendId: 'a', reason: '가능한 캐릭터 없음' }], reason: '참석할 수 있는 캐릭터가 없어요' }, friends, NOW);
+    expect(msg.embeds).toHaveLength(1);
+    expect(msg.embeds[0].color).toBe(COLOR.unknown);
+    expect(msg.embeds[0].description).toContain('참석할 수 있는 캐릭터가 없어요');
+    expect(msg.embeds[0].description).toContain('철수');
+  });
+
+  it('최악의 경우(8인 레이드, 친구 8명, 공대 3개, 후보 많음)도 유효한 임베드', () => {
+    const names = Array.from({ length: 8 }, (_, i) => `아주아주긴친구표시이름${i}번째`);
+    const longFriends = names.map((n, i) => fr(`f${i}`, n, [ch(`캐릭터이름이엄청나게긴캐릭터${i}`, i % 4 === 0 ? 'support' : 'dealer', 123456, 1765.83)]));
+    const slots: Slot[] = longFriends.map((f) => ({ kind: 'friend', friendId: f.id, character: f.characters[0] }));
+    const p = (s: Slot[]): Party => party('tight', 123456, [...s, ...Array.from({ length: 8 - s.length }, (): Slot => ({ kind: 'external', role: 'dealer' }))]);
+    const cand = { label: '3+3+2', externalCount: 16, imbalance: 0, parties: [p(slots.slice(0, 3)), p(slots.slice(3, 6)), p(slots.slice(6))] };
+    const r: PlanResult = {
+      candidates: Array.from({ length: 12 }, () => cand),
+      excluded: Array.from({ length: 30 }, (_, i) => ({ friendId: `x${i}`, reason: '가능한 캐릭터 없음' })),
+    };
+    const msg = formatPlan(getRaid('belgardin-nightmare')!, r, longFriends, NOW);
+    expectValidEmbeds(msg.embeds);
+    expect(msg.embeds[0].fields).toHaveLength(5);
+  });
+});
+
+describe('formatStatus', () => {
+  it('친구별 필드, 캐릭터별 "레이드 난이도 ✅", 없으면 "-", 꼬리말에 총 N건', () => {
+    const friends = [fr('a', '철수', [ch('A1'), ch('A2')])];
+    const msg = formatStatus(friends, [
+      { characterName: 'A1', raidName: '지평의 성당', difficulty: '1단계' },
+      { characterName: 'A1', raidName: '세르카', difficulty: '하드' },
+      { characterName: 'ghost', raidName: '세르카', difficulty: '하드' },
+    ], NOW);
+    expectValidEmbeds(msg.embeds);
+    const e = msg.embeds[0];
+    expect(e.color).toBe(COLOR.brand);
+    expect(e.title).toContain(ICON.status);
+    expect(e.fields![0].name).toBe('철수');
+    expect(e.fields![0].value).toBe('**A1** · 지평의 성당 1단계 ✅ · 세르카 하드 ✅\n**A2** · -');
+    expect(e.footer!.text).toContain('총 2건 클리어');
+  });
+
+  it('친구 5명마다 임베드를 나눈다', () => {
+    const friends = Array.from({ length: 7 }, (_, i) => fr(`f${i}`, `친구${i}`, [ch(`C${i}`)]));
+    const msg = formatStatus(friends, [], NOW);
+    expect(msg.embeds.map((e) => e.fields!.length)).toEqual([5, 2]);
+    expect(msg.embeds[1].title).toContain('(2/2)');
+  });
+
+  it('친구가 없으면 안내 문장', () => {
+    const msg = formatStatus([], [], NOW);
+    expect(msg.embeds).toEqual([]);
+    expect(msg.content).toContain('/등록');
+  });
+});
+
+describe('기타 메시지', () => {
+  it('/명령어 도움말: 묶음별 필드, 모든 명령어와 예시', () => {
+    const msg = formatHelp(COMMANDS, NOW);
+    expectValidEmbeds(msg.embeds);
+    const e = msg.embeds[0];
+    expect(e.title).toContain('사용 가능한 명령어');
+    expect(e.fields!.map((f) => f.name)).toEqual(['시작하기', '공대 짜기', '클리어 관리']);
+    const all = e.fields!.map((f) => f.value).join('\n');
+    for (const c of COMMANDS) {
+      expect(all).toContain(`/${c.name}`);
+      expect(all).toContain(c.description);
+    }
+    expect(all).toContain('/공대 레이드:세르카 하드');
+  });
+
+  it('/등록 성공: 초록 임베드, 역할별 묶음', () => {
+    const msg = registerSuccess({ displayName: '철수', representativeName: 'A1', characters: [ch('A1', 'dealer', 1, 1750), ch('A2', 'support', 1, 1760), ch('A3', 'dealer', 1, 1770)], updated: false, now: NOW });
+    expectValidEmbeds(msg.embeds);
+    const e = msg.embeds[0];
+    expect(e.color).toBe(COLOR.success);
+    expect(e.description).toContain('캐릭터 3개');
+    expect(e.description).toContain('🛡️ 서포터 1 · ⚔️ 딜러 2');
+    expect(e.fields!.map((f) => f.name)).toEqual(['🛡️ 서포터 1', '⚔️ 딜러 2']);
+    expect(e.fields![1].value.split('\n')[0]).toContain('A3'); // 레벨 높은 순
+  });
+
+  it('오류: 빨간 임베드, 원인과 해결 방법', () => {
+    const msg = errorParts('캐릭터를 찾을 수 없어요', '철자를 확인해 주세요', NOW);
+    expect(msg.content).toBe('캐릭터를 찾을 수 없어요');
+    expect(msg.embeds[0].color).toBe(COLOR.error);
+    expect(msg.embeds[0].title).toContain('캐릭터를 찾을 수 없어요');
+    expect(msg.embeds[0].fields).toEqual([{ name: '해결 방법', value: '철자를 확인해 주세요' }]);
+  });
+
+  it('/클리어 요약 임베드', () => {
+    const e = characterClearsEmbed(ch('A1'), [{ characterName: 'A1', raidName: '세르카', difficulty: '하드' }], NOW);
+    expect(e.description).toBe('✅ 세르카 하드');
+    expect(e.color).toBe(COLOR.success);
+    expect(characterClearsEmbed(ch('A2'), [], NOW).color).toBe(COLOR.unknown);
+  });
+
+  it('LIMITS 값', () => {
+    expect(LIMITS).toMatchObject({ title: 256, description: 4096, fields: 25, fieldName: 256, fieldValue: 1024, footer: 2048, embedTotal: 6000, embeds: 10 });
+  });
+});

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "vitest run"
+    "test": "vitest run",
+    "register-commands": "tsx scripts/register-commands.ts"
   },
   "dependencies": {
     "@upstash/redis": "^1.39.0",
@@ -24,6 +25,7 @@
     "@vitejs/plugin-react": "^6.1.2",
     "jsdom": "^29.1.1",
     "tsx": "^4.23.15",
+    "tweetnacl": "^1.0.3",
     "typescript": "^5.9.3",
     "vitest": "^5.0.5"
   }
