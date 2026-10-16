@@ -1,10 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Store } from '@/store/store';
 import { LostArkError, type LostArkErrorCode, type fetchRoster as FetchRoster } from '@/lostark/client';
 import { getRaid, RAIDS } from '@/core/raids';
 import { planRaid } from '@/core/planner';
 import { weekKey } from '@/core/week';
-import type { ClearRecord, Friend, RaidConfig } from '@/core/types';
+import type { Character, ClearRecord, Friend, RaidConfig } from '@/core/types';
 import { applyClearChange, formatLevel } from '@/lib/view-model';
 import { findOwner } from '@/lib/friend-dupes';
 import { COMMANDS, raidTitle } from './commands';
@@ -47,6 +47,7 @@ const FIX = {
   otherFriend: '내 캐릭터가 맞다면 웹 화면에서 그 친구를 삭제한 뒤 다시 `/등록` 해 주세요.',
   noCharacters: '`/등록`을 다시 실행해서 원정대를 새로 불러와 주세요.',
   unknownRaid: '`/공대`에서 목록에 있는 레이드를 골라 주세요.',
+  rerun: '`/클리어`를 다시 실행해서 최신 메뉴로 골라 주세요.',
 };
 const LOSTARK_FIX: Record<LostArkErrorCode, string> = {
   not_found: '캐릭터 이름의 철자를 확인하고 다시 `/등록` 해 주세요.',
@@ -191,32 +192,53 @@ async function onStatus(deps: Deps): Promise<DiscordResponse> {
 }
 
 // ---------- /클리어 ----------
+//
+// custom_id 형식
+//   캐릭터 선택: clr:c:<friendId>            (option value = 캐릭터 참조)
+//   레이드 선택: clr:r:<friendId>:<weekKey>:<캐릭터 참조>
+// 캐릭터 참조는 이름 그대로이고, custom_id 100자에 들어가지 않으면 '#' + sha256(이름) 앞 16자리.
+// 순번 대신 이름을 쓰므로 단계 사이에 원정대가 갱신돼도 다른 캐릭터에 저장되지 않는다.
+// weekKey를 담아 두어 메뉴를 연 뒤 주간 초기화가 지나면 지난주 선택을 이번 주에 쓰지 않는다.
 
 const MAX_SELECT_OPTIONS = 25;
+const MAX_CUSTOM_ID = 100;
 const clip = (s: string, n = 100) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
+const STALE_CHARACTER_TEXT = '캐릭터 목록이 바뀌었어요. `/클리어`를 다시 실행해 주세요';
+const STALE_WEEK_TEXT = '새로운 주가 시작됐어요. `/클리어`를 다시 실행해 주세요';
 
-function characterRow(friend: Friend, selected?: number): ActionRow {
-  const options = friend.characters
-    .map((c, i) => ({ c, i }))
-    .sort((a, b) => b.c.itemLevel - a.c.itemLevel)
+const hashRef = (name: string) => `#${createHash('sha256').update(name).digest('hex').slice(0, 16)}`;
+const raidSelectId = (friendId: string, week: string, ref: string) => `clr:r:${friendId}:${week}:${ref}`;
+
+/** 캐릭터 참조: 레이드 메뉴 custom_id에 이름이 들어가면 이름, 아니면 짧은 해시. 두 단계 모두 같은 값을 쓴다. */
+function characterRef(friendId: string, week: string, name: string): string {
+  return raidSelectId(friendId, week, name).length <= MAX_CUSTOM_ID ? name : hashRef(name);
+}
+
+function resolveCharacter(friend: Friend, ref: string): Character | undefined {
+  return friend.characters.find((c) => c.name === ref)
+    ?? (ref.startsWith('#') ? friend.characters.find((c) => hashRef(c.name) === ref) : undefined);
+}
+
+function characterRow(friend: Friend, week: string, selected?: string): ActionRow {
+  const options = [...friend.characters]
+    .sort((a, b) => b.itemLevel - a.itemLevel)
     .slice(0, MAX_SELECT_OPTIONS)
-    .map(({ c, i }) => ({
+    .map((c) => ({
       label: clip(c.name),
-      value: String(i),
+      value: characterRef(friend.id, week, c.name),
       description: clip(`${c.role === 'support' ? '서포터' : '딜러'} · ${c.className} · ${formatLevel(c.itemLevel)}`),
-      ...(i === selected ? { default: true } : {}),
+      ...(c.name === selected ? { default: true } : {}),
     }));
   return { type: 1, components: [{ type: 3, custom_id: `clr:c:${friend.id}`, placeholder: '캐릭터를 골라 주세요', options }] };
 }
 
-function raidRow(friend: Friend, index: number, clears: ClearRecord[]): ActionRow {
-  const name = friend.characters[index].name;
+function raidRow(friend: Friend, week: string, name: string, clears: ClearRecord[]): ActionRow {
   const done = (r: RaidConfig) => clears.some((c) => c.characterName === name && c.raidName === r.name && c.difficulty === r.difficulty);
   return {
     type: 1,
     components: [{
       type: 3,
-      custom_id: `clr:r:${friend.id}:${index}`,
+      custom_id: raidSelectId(friend.id, week, characterRef(friend.id, week, name)),
       placeholder: '이번 주에 클리어한 레이드를 모두 골라 주세요',
       min_values: 0,
       max_values: RAIDS.length,
@@ -229,17 +251,15 @@ async function onClearStart(body: DiscordInteraction, deps: Deps, fail: Fail): P
   const me = await findMe(body, deps.store);
   if (!me) return fail('먼저 `/등록`으로 대표 캐릭터를 등록해 주세요', FIX.registerFirst);
   if (me.characters.length === 0) return fail('등록된 캐릭터가 없어요', FIX.noCharacters);
-  return only(privately({ content: `${ICON.clear} 클리어를 표시할 캐릭터를 골라 주세요`, embeds: [], components: [characterRow(me)] }));
+  const week = weekKey(deps.now());
+  return only(privately({ content: `${ICON.clear} 클리어를 표시할 캐릭터를 골라 주세요`, embeds: [], components: [characterRow(me, week)] }));
 }
 
-const parseIndex = (s: string | undefined, friend: Friend): number | undefined => {
-  if (s === undefined || !/^\d+$/.test(s)) return undefined;
-  const i = Number(s);
-  return i < friend.characters.length ? i : undefined;
-};
+const inMenu = (r: { raidName: string; difficulty: string }) =>
+  RAIDS.some((x) => x.name === r.raidName && x.difficulty === r.difficulty);
 
 async function onComponent(body: DiscordInteraction, deps: Deps, fail: Fail): Promise<HandlerResult> {
-  const [prefix, kind, friendId, indexText] = (body.data?.custom_id ?? '').split(':');
+  const [prefix, kind, friendId, ...rest] = (body.data?.custom_id ?? '').split(':');
 
   if (prefix === 'plan') {
     const raid = kind ? getRaid(kind) : undefined;
@@ -251,16 +271,18 @@ async function onComponent(body: DiscordInteraction, deps: Deps, fail: Fail): Pr
   const me = await findMe(body, deps.store);
   if (!me) return fail('먼저 `/등록`으로 대표 캐릭터를 등록해 주세요', FIX.registerFirst);
   if (me.id !== friendId) return fail('내 캐릭터만 바꿀 수 있어요', FIX.notMine);
-  const values = body.data?.values ?? [];
-  const index = parseIndex(kind === 'c' ? values[0] : indexText, me);
-  if (index === undefined) return fail(UNKNOWN_TEXT, FIX.unknown);
-  const character = me.characters[index];
   const week = weekKey(deps.now());
+  const values = body.data?.values ?? [];
+  // 레이드 메뉴: 메뉴를 그린 주가 지금 주와 다르면 거절 (예전 순번 형식도 여기서 걸러진다).
+  if (kind === 'r' && rest[0] !== week) return fail(STALE_WEEK_TEXT, FIX.rerun);
+  const ref = kind === 'c' ? values[0] : rest.slice(1).join(':');
+  const character = ref ? resolveCharacter(me, ref) : undefined;
+  if (!character) return fail(STALE_CHARACTER_TEXT, FIX.rerun);
   const clears = await deps.store.getClears(week);
   const view = (content: string, cs: ClearRecord[]): MessageParts => ({
     content,
     embeds: [characterClearsEmbed(character, cs, deps.now())],
-    components: [characterRow(me, index), raidRow(me, index, cs)],
+    components: [characterRow(me, week, character.name), raidRow(me, week, character.name, cs)],
   });
 
   if (kind === 'c') {
@@ -273,7 +295,13 @@ async function onComponent(body: DiscordInteraction, deps: Deps, fail: Fail): Pr
   if (new Set(chosen.map((r) => r.name)).size !== chosen.length) {
     return only(update(view(`${ICON.error} ${DUPLICATE_RAID_TEXT}. 다시 골라 주세요.`, clears)));
   }
-  const records = chosen.map((r) => ({ raidName: r.name, difficulty: r.difficulty }));
+  // 의도된 동작: 레이드 메뉴는 RAIDS 전체(14개)를 담으므로 제출한 선택이 그 캐릭터의 "메뉴에 있는 레이드" 전체 기록을 대신한다
+  // (메뉴를 연 뒤 웹에서 같은 레이드를 바꿨다면 제출한 선택이 이긴다). 메뉴에 없는 기록(설정에서 빠진 레이드 등)은
+  // 메뉴의 기본값이 아니라 지금 저장된 값에서 가져와 그대로 남긴다.
+  const kept = clears
+    .filter((c) => c.characterName === character.name && !inMenu(c))
+    .map(({ raidName, difficulty }) => ({ raidName, difficulty }));
+  const records = [...chosen.map((r) => ({ raidName: r.name, difficulty: r.difficulty })), ...kept];
   await deps.store.setCharacterClears(week, character.name, records);
-  return only(update(view(`${ICON.clear} ${character.name} 클리어 ${records.length}건 저장했어요`, applyClearChange(clears, character.name, records))));
+  return only(update(view(`${ICON.clear} ${character.name} 클리어 ${chosen.length}건 저장했어요`, applyClearChange(clears, character.name, records))));
 }

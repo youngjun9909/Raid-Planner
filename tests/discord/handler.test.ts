@@ -211,23 +211,23 @@ describe('handleInteraction', () => {
       expect(content(r)).toContain('/등록');
     });
 
-    it('1단계: 내 캐릭터 선택 메뉴 (값 = 캐릭터 순번)', async () => {
+    it('1단계: 내 캐릭터 선택 메뉴 (값 = 캐릭터 이름)', async () => {
       const r = await run(cmd('클리어'));
       expect(r.response.type).toBe(4);
       expect(r.response.data!.flags).toBe(64);
       const select = r.response.data!.components![0].components[0] as StringSelect;
       expect(select.type).toBe(3);
       expect(select.custom_id).toBe('clr:c:fa');
-      expect(select.options.map((o: any) => o.value)).toEqual(['0', '1']);
+      expect(select.options.map((o: any) => o.value)).toEqual(['A1', 'A2-sup']);
       expect(select.options[0].label).toContain('A1');
     });
 
     it('2단계: 레이드 다중 선택, 현재 클리어가 기본 선택', async () => {
       await store.setCharacterClears(WEEK, 'A1', [{ raidName: '세르카', difficulty: '하드' }]);
-      const r = await run(comp('clr:c:fa', ['0']));
+      const r = await run(comp('clr:c:fa', ['A1']));
       expect(r.response.type).toBe(7);
       const rows = r.response.data!.components!;
-      const raidSelect = rows.flatMap((row: any) => row.components).find((c: any) => c.custom_id === 'clr:r:fa:0');
+      const raidSelect = rows.flatMap((row: any) => row.components).find((c: any) => c.custom_id === `clr:r:fa:${WEEK}:A1`);
       expect(raidSelect.min_values).toBe(0);
       expect(raidSelect.max_values).toBe(14);
       expect(raidSelect.options).toHaveLength(14);
@@ -240,13 +240,13 @@ describe('handleInteraction', () => {
       const before = all(await run(cmd('공대', [{ name: '레이드', value: 'serka-hard' }])));
       expect(before).toContain('**A1**');
 
-      const bad = await run(comp('clr:r:fa:0', ['serka-hard', 'serka-normal']));
+      const bad = await run(comp(`clr:r:fa:${WEEK}:A1`, ['serka-hard', 'serka-normal']));
       expect([4, 7]).toContain(bad.response.type);
       expect(content(bad)).toContain('한 레이드는 한 난이도만 선택할 수 있어요');
       if (bad.response.type === 4) expect(bad.response.data!.flags).toBe(64);
       expect(await store.getClears(WEEK)).toEqual([]);
 
-      const ok = await run(comp('clr:r:fa:0', ['serka-hard', 'cathedral-1']));
+      const ok = await run(comp(`clr:r:fa:${WEEK}:A1`, ['serka-hard', 'cathedral-1']));
       expect(ok.response.type).toBe(7);
       expect(content(ok)).toContain('A1 클리어 2건 저장했어요');
       expect(await store.getClears(WEEK)).toEqual(expect.arrayContaining([
@@ -261,24 +261,83 @@ describe('handleInteraction', () => {
 
     it('아무것도 고르지 않고 제출하면 클리어를 비운다', async () => {
       await store.setCharacterClears(WEEK, 'A1', [{ raidName: '세르카', difficulty: '하드' }]);
-      const r = await run(comp('clr:r:fa:0', []));
+      const r = await run(comp(`clr:r:fa:${WEEK}:A1`, []));
       expect(content(r)).toContain('A1 클리어 0건 저장했어요');
       expect(await store.getClears(WEEK)).toEqual([]);
     });
 
     it('다른 친구의 캐릭터는 바꿀 수 없다', async () => {
-      const r1 = await run(comp('clr:r:fb:0', ['serka-hard'], 'u1'));
+      const r1 = await run(comp(`clr:r:fb:${WEEK}:B1`, ['serka-hard'], 'u1'));
       expect(r1.response.data!.flags).toBe(64);
       expect(content(r1)).toContain('내 캐릭터만 바꿀 수 있어요');
-      const r2 = await run(comp('clr:c:fb', ['0'], 'u1'));
+      const r2 = await run(comp('clr:c:fb', ['B1'], 'u1'));
       expect(content(r2)).toContain('내 캐릭터만 바꿀 수 있어요');
       expect(await store.getClears(WEEK)).toEqual([]);
     });
 
-    it('없는 캐릭터 순번이나 레이드 id는 알 수 없는 명령', async () => {
-      expect(content(await run(comp('clr:r:fa:9', ['serka-hard'])))).toContain('알 수 없는 명령이에요');
-      expect(content(await run(comp('clr:r:fa:0', ['bogus'])))).toContain('알 수 없는 명령이에요');
+    it('없는 레이드 id는 알 수 없는 명령', async () => {
+      expect(content(await run(comp(`clr:r:fa:${WEEK}:A1`, ['bogus'])))).toContain('알 수 없는 명령이에요');
       expect(await store.getClears(WEEK)).toEqual([]);
+    });
+
+    it('메뉴를 연 뒤 캐릭터가 사라졌으면 다시 실행하라고 안내하고 저장하지 않는다', async () => {
+      for (const r of [await run(comp(`clr:r:fa:${WEEK}:Gone`, ['serka-hard'])), await run(comp('clr:c:fa', ['Gone']))]) {
+        expect(r.response.data!.flags).toBe(64);
+        expect(content(r)).toContain('캐릭터 목록이 바뀌었어요. `/클리어`를 다시 실행해 주세요');
+      }
+      expect(await store.getClears(WEEK)).toEqual([]);
+    });
+
+    it('단계 사이에 원정대 순서가 바뀌어도 이름으로 찾아 맞는 캐릭터에 저장한다', async () => {
+      const step2 = await run(comp('clr:c:fa', ['A1']));
+      const customId = step2.response.data!.components![1].components[0].custom_id;
+      await store.saveFriend({ ...friendA, characters: [ch('A0-new'), ch('A2-sup', 'support', 2500), ch('A1')] });
+      const r = await run(comp(customId, ['serka-hard']));
+      expect(content(r)).toContain('A1 클리어 1건 저장했어요');
+      expect(await store.getClears(WEEK)).toEqual([{ characterName: 'A1', raidName: '세르카', difficulty: '하드' }]);
+    });
+
+    it('예전 형식(순번)의 메뉴는 저장하지 않고 다시 실행하라고 안내한다', async () => {
+      const r = await run(comp('clr:r:fa:0', ['serka-hard']));
+      expect(r.response.data!.flags).toBe(64);
+      expect(content(r)).toMatch(/`\/클리어`를 다시 실행해 주세요/);
+      expect(await store.getClears(WEEK)).toEqual([]);
+    });
+
+    it('메뉴를 연 뒤 새 주가 시작됐으면 거절하고 저장하지 않는다', async () => {
+      const lastWeek = weekKey(new Date(NOW.getTime() - 7 * 86400000));
+      const r = await run(comp(`clr:r:fa:${lastWeek}:A1`, ['serka-hard']));
+      expect(r.response.data!.flags).toBe(64);
+      expect(content(r)).toContain('새로운 주가 시작됐어요. `/클리어`를 다시 실행해 주세요');
+      expect(await store.getClears(WEEK)).toEqual([]);
+    });
+
+    it('제출한 선택이 메뉴에 있는 레이드 전체를 대신하고, 메뉴에 없는 기록은 지금 저장된 값에서 가져와 남긴다', async () => {
+      const step2 = await run(comp('clr:c:fa', ['A1']));
+      const customId = step2.response.data!.components![1].components[0].custom_id;
+      // 메뉴를 연 뒤 웹에서 바뀐 기록: 메뉴에 있는 레이드(세르카)와 메뉴에 없는 기록(옛 레이드)
+      await store.setCharacterClears(WEEK, 'A1', [{ raidName: '세르카', difficulty: '노말' }, { raidName: '옛 레이드', difficulty: '노말' }]);
+      await run(comp(customId, ['cathedral-1']));
+      expect(await store.getClears(WEEK)).toEqual(expect.arrayContaining([
+        { characterName: 'A1', raidName: '지평의 성당', difficulty: '1단계' },
+        { characterName: 'A1', raidName: '옛 레이드', difficulty: '노말' },
+      ]));
+      expect(await store.getClears(WEEK)).toHaveLength(2);
+    });
+
+    it('custom_id에 다 들어가지 않는 긴 이름은 짧은 해시로 담고 그 해시로 찾는다', async () => {
+      const id = '123e4567-e89b-12d3-a456-426614174000';
+      const longName = '가'.repeat(60);
+      await store.saveFriend({ id, displayName: '긴이름', discordUserId: 'u7', representativeName: longName, characters: [ch(longName)] });
+      const step1 = await run(cmd('클리어', [], 'u7'));
+      const value = (step1.response.data!.components![0].components[0] as StringSelect).options[0].value;
+      expect(value.length).toBeLessThanOrEqual(100);
+      const step2 = await run(comp(`clr:c:${id}`, [value], 'u7'));
+      const customId = step2.response.data!.components![1].components[0].custom_id as string;
+      expect(customId.length).toBeLessThanOrEqual(100);
+      expect(customId).toMatch(new RegExp(`^clr:r:${id}:${WEEK}:#[0-9a-f]+$`));
+      expect(content(await run(comp(customId, ['serka-hard'], 'u7')))).toContain('클리어 1건 저장했어요');
+      expect(await store.getClears(WEEK)).toEqual([{ characterName: longName, raidName: '세르카', difficulty: '하드' }]);
     });
   });
 
@@ -347,9 +406,9 @@ describe('handleInteraction', () => {
 
   it('/클리어 2단계와 저장 응답에 캐릭터 요약 임베드가 붙는다', async () => {
     await store.saveFriend(friendA);
-    const step2 = await run(comp('clr:c:fa', ['0']));
+    const step2 = await run(comp('clr:c:fa', ['A1']));
     expect(step2.response.data!.embeds![0].title).toContain('A1');
-    const saved = await run(comp('clr:r:fa:0', ['serka-hard']));
+    const saved = await run(comp(`clr:r:fa:${WEEK}:A1`, ['serka-hard']));
     expect(saved.response.data!.embeds![0].description).toBe('✅ 세르카 하드');
     const raidSelect = saved.response.data!.components![1].components[0] as { options: { value: string; default?: boolean }[] };
     expect(raidSelect.options.find((o) => o.value === 'serka-hard')!.default).toBe(true);
