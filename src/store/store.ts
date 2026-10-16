@@ -86,8 +86,9 @@ export function createUpstashStore(redis: Redis): Store {
     return f ? withManual(f, await readManual(id)) : undefined;
   };
   const listFriends = async (): Promise<Friend[]> => {
-    // auto-deserializing clients may return numeric-looking ids as numbers
-    const ids = ((await redis.smembers('friends')) as unknown[]).map((id) => String(id)).sort();
+    // auto-deserializing clients may return numeric-looking ids as numbers; ids are only
+    // used in key template literals, so that is harmless (covered by the numeric-id test)
+    const ids = ((await redis.smembers('friends')) as string[]).sort();
     const all = await Promise.all(ids.map(getFriend));
     return all.filter((f): f is Friend => f !== undefined);
   };
