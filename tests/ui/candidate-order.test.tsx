@@ -14,7 +14,7 @@ const friends: Friend[] = [{ id: 'f1', displayName: '영준', representativeName
 const cand = (slots: Slot[]): Candidate => ({
   parties: [{ slots, dealerAvgCP: 1000, tier: 'comfortable' }],
   summary: { friendCount: 1, characterCount: slots.length, partyCount: 1, externalCount: 0, externalSupports: 0, externalDealers: 0, friendThreshold: 1 },
-  imbalance: 0, unplaced: [],
+  kind: 'recommended', imbalance: 0, unplaced: [],
 });
 const rowNames = (list: HTMLElement) => within(list).getAllByRole('listitem').map((li) => li.textContent ?? '');
 

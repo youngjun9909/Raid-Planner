@@ -19,6 +19,7 @@ const cand = (unplaced: UnplacedCharacter[], externalCount = 1): Candidate => ({
   summary: {
     friendCount: 3, characterCount: 3, partyCount: 1, externalCount, externalSupports: externalCount, externalDealers: 0, friendThreshold: 3,
   },
+  kind: 'recommended',
   imbalance: 0,
   unplaced,
 });

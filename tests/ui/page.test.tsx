@@ -173,7 +173,7 @@ describe('웹 화면', () => {
   // 영준(f1): 가나 + 가나서폿 두 캐릭터로 1공대·2공대에, 민수(f2): 다라로 1공대에만
   const multiRun: Candidate = {
     summary: { friendCount: 2, characterCount: 3, partyCount: 2, externalCount: 5, externalSupports: 1, externalDealers: 4, friendThreshold: 1 },
-    imbalance: 350, unplaced: [],
+    kind: 'recommended', imbalance: 350, unplaced: [],
     parties: [
       {
         slots: [
@@ -199,7 +199,7 @@ describe('웹 화면', () => {
   };
   const friendsOnly: Candidate = {
     summary: { friendCount: 2, characterCount: 2, partyCount: 1, externalCount: 0, externalSupports: 0, externalDealers: 0, friendThreshold: 1 },
-    imbalance: 0, unplaced: [],
+    kind: 'recommended', imbalance: 0, unplaced: [],
     parties: [{
       slots: [
         { kind: 'friend', friendId: 'f1', character: ch('가나서폿', 'support', null) },

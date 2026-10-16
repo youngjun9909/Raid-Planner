@@ -15,7 +15,7 @@ const party = (slots: Slot[], tier: Party['tier'] = 'comfortable'): Party => ({ 
 const cand = (parties: Party[]): Candidate => ({
   parties,
   summary: { friendCount: 1, characterCount: 1, partyCount: parties.length, externalCount: 0, externalSupports: 0, externalDealers: 0, friendThreshold: 1 },
-  imbalance: 0, unplaced: [],
+  kind: 'recommended', imbalance: 0, unplaced: [],
 });
 const four = [fs('딜1', 'dealer', 2500), fs('서폿', 'support', null), { kind: 'external', role: 'dealer' } as Slot, { kind: 'external', role: 'dealer' } as Slot];
 
