@@ -11,7 +11,8 @@ import type { StringSelect } from '@/discord/types';
 
 const NOW = new Date('2026-10-16T03:00:00Z');
 const WEEK = weekKey(NOW);
-const ch = (name: string, role: 'dealer' | 'support' = 'dealer', cp: number | null = 3800, itemLevel = 1760): Character =>
+// 기본 1735: 세르카의 자동 가는 난이도가 하드라서 /공대 세르카 하드 후보가 된다 (설계 수정 2026-10-16 A)
+const ch = (name: string, role: 'dealer' | 'support' = 'dealer', cp: number | null = 3800, itemLevel = 1735): Character =>
   ({ name, className: '버서커', role, itemLevel, combatPower: cp });
 
 let store: Store;

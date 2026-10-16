@@ -108,11 +108,11 @@ describe('formatPlan', () => {
   ];
   const party = (tier: Party['tier'], avg: number | null, slots: Slot[]): Party => ({ tier, dealerAvgCP: avg, slots });
   const summary = (s: Partial<Candidate['summary']>): Candidate['summary'] => ({
-    friendCount: 2, characterCount: 3, partyCount: 2, externalCount: 5, externalSupports: 1, externalDealers: 4, ...s,
+    friendCount: 2, characterCount: 3, partyCount: 2, externalCount: 5, externalSupports: 1, externalDealers: 4, friendThreshold: 2, ...s,
   });
   // 추천 1: 철수가 A1(숙련)로 1공대, A2(클경)로 2공대 / 영희는 1공대 (숙련도 없음 = 반숙)
   const first: Candidate = {
-    summary: summary({}), imbalance: 800,
+    summary: summary({}), imbalance: 800, unplaced: [],
     parties: [
       party('comfortable', 3800, [
         { kind: 'friend', friendId: 'a', character: friends[0].characters[0], proficiency: '숙련' },
@@ -129,7 +129,7 @@ describe('formatPlan', () => {
     ],
   };
   const second: Candidate = {
-    summary: summary({}), imbalance: 0,
+    summary: summary({}), imbalance: 0, unplaced: [],
     parties: [
       party('unknown', null, [
         { kind: 'friend', friendId: 'b', character: friends[1].characters[0] },
@@ -156,7 +156,7 @@ describe('formatPlan', () => {
     expect(e1.author!.name).toContain('공대 추천');
     expect(e1.timestamp).toBe(NOW.toISOString());
     const desc = e1.description!.split('\n');
-    expect(desc[0]).toBe('친구 2명 · 캐릭터 3개 · 공대 2개 · 외부 5명 필요 (서포터 1, 딜러 4)');
+    expect(desc[0]).toBe('친구 2명 · 캐릭터 3개 편성 · 공대 2개 · 외부 5명 필요 (서포터 1, 딜러 4)');
     expect(desc[1]).toBe('권장 전투력 3,600~4,000');
     expect(e1.description).toContain('민수 (가능한 캐릭터 없음)');
     expect(e2.description).not.toContain('민수');
@@ -213,7 +213,7 @@ describe('formatPlan', () => {
     const sup = [ch('S1', 'support', null, 1750), ch('S2', 'support', null, 1745)];
     const fs8 = [fr('a', '철수', [...ds, ...sup])];
     const slots: Slot[] = [sup[1], ...ds, sup[0]].map((c) => ({ kind: 'friend', friendId: 'a', character: c }));
-    const cand8: Candidate = { summary: summary({ externalCount: 0, externalSupports: 0, externalDealers: 0 }), imbalance: 0, parties: [party('comfortable', 3500, slots)] };
+    const cand8: Candidate = { summary: summary({ externalCount: 0, externalSupports: 0, externalDealers: 0, friendThreshold: 1 }), imbalance: 0, unplaced: [], parties: [party('comfortable', 3500, slots)] };
     const msg = formatPlan(kz, { candidates: [cand8], excluded: [] }, fs8, NOW);
     expectValidEmbeds(msg.embeds);
     const lines = msg.embeds[0].fields![0].value.split('\n').slice(1); // 게이지 줄 제외
@@ -224,14 +224,14 @@ describe('formatPlan', () => {
   it('외부 인원이 없으면 "친구들만으로 구성 가능"', () => {
     const r: PlanResult = {
       candidates: [{
-        summary: summary({ friendCount: 1, characterCount: 1, partyCount: 1, externalCount: 0, externalSupports: 0, externalDealers: 0 }),
-        imbalance: 0,
+        summary: summary({ friendCount: 1, characterCount: 1, partyCount: 1, externalCount: 0, externalSupports: 0, externalDealers: 0, friendThreshold: 1 }),
+        imbalance: 0, unplaced: [],
         parties: [party('tight', 3300, [{ kind: 'friend', friendId: 'a', character: friends[0].characters[0] }])],
       }],
       excluded: [],
     };
     const e = formatPlan(serkaHard, r, friends, NOW).embeds[0];
-    expect(e.description!.split('\n')[0]).toBe('친구 1명 · 캐릭터 1개 · 공대 1개 · 친구들만으로 구성 가능');
+    expect(e.description!.split('\n')[0]).toBe('친구 1명 · 캐릭터 1개 편성 · 공대 1개 · 친구들만으로 구성 가능');
     expect(e.footer!.text).toContain('친구들만으로 구성 가능');
     expect(e.color).toBe(COLOR.tight);
   });
@@ -253,8 +253,8 @@ describe('formatPlan', () => {
 
   it('추천이 10개를 넘어도 임베드는 10개까지, 합계 6000자 안 (작은 추천 12개)', () => {
     const small: Candidate = {
-      summary: summary({ friendCount: 1, characterCount: 1, partyCount: 1, externalCount: 3, externalSupports: 1, externalDealers: 2 }),
-      imbalance: 0,
+      summary: summary({ friendCount: 1, characterCount: 1, partyCount: 1, externalCount: 3, externalSupports: 1, externalDealers: 2, friendThreshold: 1 }),
+      imbalance: 0, unplaced: [],
       parties: [party('tight', 3300, [
         { kind: 'friend', friendId: 'a', character: friends[0].characters[0] },
         { kind: 'external', role: 'support' }, { kind: 'external', role: 'dealer' }, { kind: 'external', role: 'dealer' },
@@ -297,7 +297,7 @@ describe('formatPlan', () => {
   });
 
   it('공대가 많을 때: 4인 레이드 친구 8명 x 6 → 공대 16개는 다 보이고, 16명 → 공대 32개는 줄였다고 알린다', () => {
-    const raid = getRaid('serka-hard')!;
+    const raid = getRaid('serka-nightmare')!; // 캐릭터가 1765라 세르카는 자동으로 나이트메어 (설계 수정 2026-10-16 A)
     const eight = longRoster();
     const p8 = planRaid({ raid, friends: eight, clears: [], attendeeIds: eight.map((f) => f.id) });
     const m8 = formatPlan(raid, p8, eight, NOW);

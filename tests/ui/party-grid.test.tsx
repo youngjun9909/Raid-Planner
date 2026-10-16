@@ -14,8 +14,8 @@ const friends: Friend[] = [{ id: 'f1', displayName: '영준', representativeName
 const party = (slots: Slot[], tier: Party['tier'] = 'comfortable'): Party => ({ slots, dealerAvgCP: 2000, tier });
 const cand = (parties: Party[]): Candidate => ({
   parties,
-  summary: { friendCount: 1, characterCount: 1, partyCount: parties.length, externalCount: 0, externalSupports: 0, externalDealers: 0 },
-  imbalance: 0,
+  summary: { friendCount: 1, characterCount: 1, partyCount: parties.length, externalCount: 0, externalSupports: 0, externalDealers: 0, friendThreshold: 1 },
+  imbalance: 0, unplaced: [],
 });
 const four = [fs('딜1', 'dealer', 2500), fs('서폿', 'support', null), { kind: 'external', role: 'dealer' } as Slot, { kind: 'external', role: 'dealer' } as Slot];
 

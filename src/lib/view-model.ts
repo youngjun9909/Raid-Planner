@@ -90,10 +90,11 @@ export function countExternals(slots: Slot[]): { support: number; dealer: number
 
 /**
  * 추천 한 줄 요약 (웹/디스코드 공통):
- * "친구 2명 · 캐릭터 3개 · 공대 2개 · 외부 5명 필요 (서포터 2, 딜러 3)", 외부인이 없으면 "… · 친구들만으로 구성 가능".
+ * "친구 2명 · 캐릭터 3개 편성 · 공대 2개 · 외부 5명 필요 (서포터 2, 딜러 3)", 외부인이 없으면 "… · 친구들만으로 구성 가능".
+ * 캐릭터 수는 편성된 캐릭터만 센다 (못 간 캐릭터는 따로 보여 준다).
  */
 export function planSummaryText(s: PlanSummary): string {
-  const head = `친구 ${s.friendCount}명 · 캐릭터 ${s.characterCount}개 · 공대 ${s.partyCount}개`;
+  const head = `친구 ${s.friendCount}명 · 캐릭터 ${s.characterCount}개 편성 · 공대 ${s.partyCount}개`;
   return s.externalCount === 0
     ? `${head} · 친구들만으로 구성 가능`
     : `${head} · 외부 ${s.externalCount}명 필요 (서포터 ${s.externalSupports}, 딜러 ${s.externalDealers})`;

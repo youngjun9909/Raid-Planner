@@ -20,8 +20,8 @@ const party = (slots: Slot[], withSummary = true): Party =>
   ({ slots, dealerAvgCP: 2000, tier: 'comfortable', ...(withSummary ? { proficiency: summarizeProficiency(slots) } : {}) });
 const cand = (parties: Party[]): Candidate => ({
   parties,
-  summary: { friendCount: 2, characterCount: 4, partyCount: parties.length, externalCount: 0, externalSupports: 0, externalDealers: 0 },
-  imbalance: 0,
+  summary: { friendCount: 2, characterCount: 4, partyCount: parties.length, externalCount: 0, externalSupports: 0, externalDealers: 0, friendThreshold: 1 },
+  imbalance: 0, unplaced: [],
 });
 
 describe('추천 카드의 숙련도', () => {

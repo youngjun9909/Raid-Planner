@@ -133,8 +133,8 @@ describe('웹 화면', () => {
 
   // 영준(f1): 가나 + 가나서폿 두 캐릭터로 1공대·2공대에, 민수(f2): 다라로 1공대에만
   const multiRun: Candidate = {
-    summary: { friendCount: 2, characterCount: 3, partyCount: 2, externalCount: 5, externalSupports: 1, externalDealers: 4 },
-    imbalance: 350,
+    summary: { friendCount: 2, characterCount: 3, partyCount: 2, externalCount: 5, externalSupports: 1, externalDealers: 4, friendThreshold: 1 },
+    imbalance: 350, unplaced: [],
     parties: [
       {
         slots: [
@@ -159,8 +159,8 @@ describe('웹 화면', () => {
     ],
   };
   const friendsOnly: Candidate = {
-    summary: { friendCount: 2, characterCount: 2, partyCount: 1, externalCount: 0, externalSupports: 0, externalDealers: 0 },
-    imbalance: 0,
+    summary: { friendCount: 2, characterCount: 2, partyCount: 1, externalCount: 0, externalSupports: 0, externalDealers: 0, friendThreshold: 1 },
+    imbalance: 0, unplaced: [],
     parties: [{
       slots: [
         { kind: 'friend', friendId: 'f1', character: ch('가나서폿', 'support', null) },
@@ -179,8 +179,8 @@ describe('웹 화면', () => {
     const second = screen.getByRole('article', { name: /추천 2/ });
     expect(within(first).getByRole('heading', { level: 4 })).toHaveTextContent('⭐추천 1');
     expect(within(second).getByRole('heading', { level: 4 })).toHaveTextContent(/^추천 2$/);
-    expect(within(first).getByText('친구 2명 · 캐릭터 3개 · 공대 2개 · 외부 5명 필요 (서포터 1, 딜러 4)')).toBeInTheDocument();
-    expect(within(second).getByText('친구 2명 · 캐릭터 2개 · 공대 1개 · 친구들만으로 구성 가능')).toBeInTheDocument();
+    expect(within(first).getByText('친구 2명 · 캐릭터 3개 편성 · 공대 2개 · 외부 5명 필요 (서포터 1, 딜러 4)')).toBeInTheDocument();
+    expect(within(second).getByText('친구 2명 · 캐릭터 2개 편성 · 공대 1개 · 친구들만으로 구성 가능')).toBeInTheDocument();
     // 공대는 카드 안에 1공대, 2공대 순서로. 공대 영역 이름은 추천 번호를 넣어 페이지 안에서 겹치지 않는다
     const parties = within(first).getAllByRole('region').map((r) => r.getAttribute('aria-label'));
     expect(parties).toEqual(['추천 1 1공대', '추천 1 2공대']);

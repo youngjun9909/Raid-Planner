@@ -2,6 +2,7 @@ import { getStore } from '@/store/store';
 import { getRaid } from '@/core/raids';
 import { planRaid } from '@/core/planner';
 import { proficiencyLookup } from '@/core/proficiency';
+import { targetDifficultyLookup } from '@/core/difficulty';
 import { weekKey } from '@/core/week';
 import { badRequest, guard, readJson, withConfigErrors } from '@/lib/http';
 
@@ -16,7 +17,10 @@ export const POST = withConfigErrors(async (req: Request) => {
   if (!raid) return badRequest('알 수 없는 레이드예요');
   const store = getStore();
   const [friends, clears] = await Promise.all([store.listFriends(), store.getClears(weekKey(new Date()))]);
-  // 숙련도는 저장소가 친구마다 붙여 준 값(레이드 이름 기준)을 쓴다. 정하지 않은 칸은 반숙.
-  const result = planRaid({ raid, friends, clears, attendeeIds: body.attendeeIds as string[], proficiency: proficiencyLookup(friends, raid.name) });
+  // 숙련도와 가는 난이도는 저장소가 친구마다 붙여 준 값(레이드 이름 기준)을 쓴다. 정하지 않은 칸은 반숙 / 자동 난이도.
+  const result = planRaid({
+    raid, friends, clears, attendeeIds: body.attendeeIds as string[],
+    proficiency: proficiencyLookup(friends, raid.name), targetDifficulty: targetDifficultyLookup(friends, raid.name),
+  });
   return Response.json({ ...result, raid });
 });
