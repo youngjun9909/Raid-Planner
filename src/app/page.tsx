@@ -66,12 +66,26 @@ export default function Home() {
     ),
   );
 
+  /**
+   * 칸 키는 JSON 배열 문자열 (구분자가 이름과 겹치지 않게). pendingProf는 아직 저장이 끝나지 않은 낙관적 값으로,
+   * 서버 사본으로 친구를 바꿀 때(전투력/역할 저장 등) 다시 덮어 써서 화면 값이 되돌아가지 않게 한다.
+   * profGen은 칸별 변경 번호: 실패한 저장보다 새 변경이 시작됐으면 되돌리지 않는다.
+   */
+  type PendingProf = { friendId: string; characterName: string; raidName: string; level: Proficiency | null };
+  const pendingProf = useRef(new Map<string, PendingProf>());
+  const profGen = useRef(new Map<string, number>());
+  const withPending = useCallback((list: Friend[]): Friend[] => {
+    let out = list;
+    for (const p of pendingProf.current.values()) out = withProficiency(out, p.friendId, p.characterName, p.raidName, p.level);
+    return out;
+  }, []);
+
   const load = useCallback(async (pw: string) => {
     const [f, c] = await Promise.all([api.listFriends(pw), api.getClears(pw)]);
-    setFriends(f);
+    setFriends(withPending(f));
     commitClears(c);
     setLoadError(null);
-  }, [commitClears]);
+  }, [commitClears, withPending]);
 
   /** 비밀번호가 바뀌어 401이 오면 입력창으로 돌아간다. */
   const handle = useCallback((e: unknown): string => {
@@ -197,20 +211,25 @@ export default function Home() {
 
   async function changeProficiency(friendId: string, characterName: string, raidName: string, level: Proficiency | null) {
     if (!password) return;
-    const cell = `${friendId} ${proficiencyKey(characterName, raidName)}`;
+    const cell = JSON.stringify([friendId, characterName, raidName]);
+    const gen = (profGen.current.get(cell) ?? 0) + 1;
+    profGen.current.set(cell, gen);
+    const isLatest = () => profGen.current.get(cell) === gen;
+    pendingProf.current.set(cell, { friendId, characterName, raidName, level });
     // 먼저 화면에 반영하고(낙관적 업데이트) 저장은 칸별 순서대로.
     setFriends((prev) => (prev ? withProficiency(prev, friendId, characterName, raidName, level) : prev));
     setNotice(null);
     const res = await profQueue.save(cell, { password, friendId, characterName, raidName, level });
+    if (isLatest()) pendingProf.current.delete(cell);
     if (res.ok) {
       setVersion((v) => v + 1);
       return;
     }
-    if (res.superseded) return; // 더 새 값이 곧 저장된다
+    if (res.superseded || !isLatest()) return; // 더 새 값이 곧(또는 이미) 저장된다
     setNotice(`${characterName}의 ${raidName} 숙련도를 저장하지 못했어요: ${handle(res.error)}`);
     try {
       const server = await api.listFriends(password);
-      if (profQueue.isBusy(cell)) return; // 그사이 새 변경이 생겼으면 그 값을 지킨다
+      if (!isLatest()) return; // 재조회하는 사이 새 변경이 시작됐으면 그 값을 지킨다
       const saved = server.find((f) => f.id === friendId)?.proficiency?.[proficiencyKey(characterName, raidName)] ?? null;
       setFriends((prev) => (prev ? withProficiency(prev, friendId, characterName, raidName, saved) : prev));
     } catch {
@@ -218,7 +237,9 @@ export default function Home() {
     }
   }
 
-  const replaceFriend = (f: Friend) => setFriends((prev) => (prev ?? []).map((x) => (x.id === f.id ? f : x)));
+  /** 서버 사본으로 친구를 바꾼다. 저장 중인 숙련도 값은 다시 얹는다. */
+  const replaceFriend = (f: Friend) =>
+    setFriends((prev) => withPending((prev ?? []).map((x) => (x.id === f.id ? f : x))));
 
   async function saveCombatPower(friendId: string, characterName: string, cp: number | null) {
     if (!password) return '비밀번호가 필요해요';

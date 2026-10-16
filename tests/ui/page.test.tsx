@@ -21,6 +21,8 @@ let clears: ClearRecord[];
 let planResult: PlanResult;
 let putResponder: ((body: { characterName: string; records: unknown[] }) => Promise<Response>) | null;
 let profResponder: ((body: { characterName: string; raidName: string; level: string | null }) => Promise<Response>) | null;
+/** 처음 불러오기 다음의 GET /api/friends 응답 (되돌리기용 재조회를 늦추는 데 쓴다). */
+let friendsResponder: (() => Promise<Response>) | null;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -31,6 +33,7 @@ beforeEach(() => {
   planResult = { candidates: [], excluded: [] };
   putResponder = null;
   profResponder = null;
+  friendsResponder = null;
   localStorage.setItem(PASSWORD_KEY, 'pw');
   vi.stubGlobal(
     'fetch',
@@ -39,7 +42,10 @@ beforeEach(() => {
       const body = init.body ? JSON.parse(init.body as string) : undefined;
       const password = (init.headers as Record<string, string> | undefined)?.['x-app-password'] ?? null;
       calls.push({ url, method, body, password });
-      if (url === '/api/friends' && method === 'GET') return json(FRIENDS);
+      if (url === '/api/friends' && method === 'GET') {
+        const first = calls.filter((c) => c.url === '/api/friends' && c.method === 'GET').length === 1;
+        return !first && friendsResponder ? friendsResponder() : json(FRIENDS);
+      }
       if (url === '/api/friends' && method === 'POST')
         return json({ id: 'f3', displayName: body.displayName, representativeName: body.representativeName, characters: [ch(body.representativeName)] });
       if (url === '/api/clears' && method === 'GET') return json(clears);
@@ -481,6 +487,40 @@ describe('웹 화면', () => {
         expect(await screen.findByText('가나의 세르카 숙련도를 저장하지 못했어요: 저장 실패')).toBeInTheDocument();
         await waitFor(() => expect(friendGets()).toHaveLength(2));
         await waitFor(() => expect(prof('가나', '세르카').value).toBe('숙련'));
+      });
+
+      it('숙련도 저장 중에 같은 친구의 전투력 저장이 끝나도 화면의 숙련도 값이 되돌아가지 않는다', async () => {
+        await renderLoaded();
+        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '클경' } });
+        await waitFor(() => expect(gates).toHaveLength(1));
+        // 전투력 저장 응답은 서버 사본(숙련도 저장 전)이라 벨가르딘 칸 값이 없다
+        const input = screen.getByRole('spinbutton', { name: '가나서폿 전투력' });
+        fireEvent.change(input, { target: { value: '1800' } });
+        fireEvent.submit(input.closest('form')!);
+        expect(await screen.findByText('1,800')).toBeInTheDocument();
+        expect(prof('가나', '벨가르딘').value).toBe('클경');
+        gates[0].ok();
+        await waitFor(() => expect(server['가나|벨가르딘']).toBe('클경'));
+        await new Promise((r) => setTimeout(r, 20));
+        expect(prof('가나', '벨가르딘').value).toBe('클경');
+        expect(prof('가나', '세르카').value).toBe('숙련'); // 다른 칸은 서버 사본 그대로
+      });
+
+      it('실패 뒤 되돌리기 재조회가 끝나기 전에 새 변경이 저장되면, 늦게 온 옛 서버 값으로 되돌리지 않는다', async () => {
+        let releaseRefetch!: () => void;
+        friendsResponder = () => new Promise<Response>((resolve) => { releaseRefetch = () => resolve(json(FRIENDS)); }); // 옛 값(세르카 = 숙련)
+        await renderLoaded();
+        fireEvent.change(prof('가나', '세르카'), { target: { value: '클경' } });
+        await waitFor(() => expect(gates).toHaveLength(1));
+        gates[0].fail();
+        await waitFor(() => expect(friendGets()).toHaveLength(2)); // 되돌리기용 재조회가 진행 중
+        fireEvent.change(prof('가나', '세르카'), { target: { value: '반숙' } });
+        await waitFor(() => expect(gates).toHaveLength(2));
+        gates[1].ok();
+        await waitFor(() => expect(server['가나|세르카']).toBe('반숙'));
+        releaseRefetch();
+        await new Promise((r) => setTimeout(r, 30));
+        expect(prof('가나', '세르카').value).toBe('반숙');
       });
     });
   });
