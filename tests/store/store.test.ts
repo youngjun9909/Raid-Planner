@@ -1,16 +1,21 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Redis } from '@upstash/redis';
 import { createMemoryStore, createUpstashStore, type Store } from '@/store/store';
 import type { Friend } from '@/core/types';
 
 // Minimal in-test fake of the Redis methods the Upstash store uses:
 // get, set, del, sadd, smembers, hget, hset, hgetall, hdel
-function fakeRedis(): Redis {
+// autoParse mimics the real client: JSON-parses string values (incl. numeric-looking set members) on read.
+function fakeRedis(autoParse = false): Redis {
+  const out = (v: unknown): unknown => {
+    if (!autoParse || typeof v !== 'string') return v;
+    try { return JSON.parse(v); } catch { return v; }
+  };
   const kv = new Map<string, unknown>();
   const sets = new Map<string, Set<string>>();
   const hashes = new Map<string, Map<string, unknown>>();
   const fake = {
-    async get(k: string) { return kv.has(k) ? kv.get(k) : null; },
+    async get(k: string) { return kv.has(k) ? out(kv.get(k)) : null; },
     async set(k: string, v: unknown) { kv.set(k, v); return 'OK'; },
     async del(...ks: string[]) {
       let n = 0;
@@ -20,8 +25,8 @@ function fakeRedis(): Redis {
     async sadd(k: string, ...ms: string[]) {
       const s = sets.get(k) ?? new Set<string>(); ms.forEach((m) => s.add(m)); sets.set(k, s); return ms.length;
     },
-    async smembers(k: string) { return [...(sets.get(k) ?? [])]; },
-    async hget(k: string, f: string) { return hashes.get(k)?.get(f) ?? null; },
+    async smembers(k: string) { return [...(sets.get(k) ?? [])].map(out); },
+    async hget(k: string, f: string) { return out(hashes.get(k)?.get(f) ?? null); },
     async hset(k: string, o: Record<string, unknown>) {
       const h = hashes.get(k) ?? new Map<string, unknown>();
       for (const [f, v] of Object.entries(o)) h.set(f, v);
@@ -29,7 +34,7 @@ function fakeRedis(): Redis {
     },
     async hgetall(k: string) {
       const h = hashes.get(k);
-      return h && h.size ? Object.fromEntries(h) : null;
+      return h && h.size ? Object.fromEntries([...h].map(([f, v]) => [f, out(v)])) : null;
     },
     async hdel(k: string, ...fs: string[]) {
       const h = hashes.get(k); if (!h) return 0;
@@ -52,7 +57,8 @@ const friend = (over: Partial<Friend> = {}): Friend => ({
 
 describe.each([
   ['memory', () => createMemoryStore()],
-  ['upstash', () => createUpstashStore(fakeRedis())],
+  ['upstash', () => createUpstashStore(fakeRedis(false))],
+  ['upstash autoParse', () => createUpstashStore(fakeRedis(true))],
 ] as [string, () => Store][])('Store contract (%s)', (_n, make) => {
   let s: Store;
   beforeEach(() => { s = make(); });
@@ -111,5 +117,66 @@ describe.each([
     await s.setCharacterClears('w1', 'Alpha', [{ raidName: 'R1', difficulty: 'n' }]);
     await s.deleteWeek('w1');
     expect(await s.getClears('w1')).toEqual([]);
+  });
+});
+
+describe('Upstash store with auto-deserializing client', () => {
+  it('숫자형 문자열 friend id도 listFriends/getFriend로 읽힌다', async () => {
+    const s = createUpstashStore(fakeRedis(true));
+    await s.saveFriend(friend({ id: '123456' }));
+    expect((await s.getFriend('123456'))!.id).toBe('123456');
+    expect((await s.listFriends()).map((f) => f.id)).toEqual(['123456']);
+  });
+
+  it('구조분해한 메서드도 this 없이 동작한다', async () => {
+    const { saveFriend, listFriends } = createUpstashStore(fakeRedis(true));
+    await saveFriend(friend());
+    expect(await listFriends()).toHaveLength(1);
+  });
+});
+
+describe('memory store copies', () => {
+  it('반환된 Friend를 변경해도 저장 상태는 바뀌지 않는다', async () => {
+    const s = createMemoryStore();
+    await s.saveFriend(friend());
+    const f = (await s.getFriend('f1'))!;
+    f.displayName = 'X'; f.characters[0].name = 'Y';
+    (await s.listFriends())[0].characters.pop();
+    expect(await s.getFriend('f1')).toEqual(friend());
+  });
+});
+
+describe('getStore', () => {
+  const saved = { u: process.env.UPSTASH_REDIS_REST_URL, t: process.env.UPSTASH_REDIS_REST_TOKEN };
+  afterEach(() => {
+    if (saved.u === undefined) delete process.env.UPSTASH_REDIS_REST_URL; else process.env.UPSTASH_REDIS_REST_URL = saved.u;
+    if (saved.t === undefined) delete process.env.UPSTASH_REDIS_REST_TOKEN; else process.env.UPSTASH_REDIS_REST_TOKEN = saved.t;
+    vi.doUnmock('@upstash/redis');
+    vi.resetModules();
+  });
+
+  it('env가 없으면 메모리 저장소이고 같은 인스턴스를 돌려준다', async () => {
+    delete process.env.UPSTASH_REDIS_REST_URL; delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    const ctor = vi.fn();
+    vi.resetModules();
+    vi.doMock('@upstash/redis', () => ({ Redis: ctor }));
+    const m = await import('@/store/store');
+    const a = m.getStore();
+    expect(m.getStore()).toBe(a);
+    expect(ctor).not.toHaveBeenCalled();
+    await a.saveFriend(friend());
+    expect(await a.listFriends()).toHaveLength(1);
+  });
+
+  it('env가 있으면 Upstash 저장소를 한 번만 만든다', async () => {
+    process.env.UPSTASH_REDIS_REST_URL = 'https://example.invalid'; process.env.UPSTASH_REDIS_REST_TOKEN = 'tok';
+    const ctor = vi.fn();
+    vi.resetModules();
+    vi.doMock('@upstash/redis', () => ({ Redis: ctor }));
+    const m = await import('@/store/store');
+    const a = m.getStore();
+    expect(m.getStore()).toBe(a);
+    expect(ctor).toHaveBeenCalledTimes(1);
+    expect(ctor).toHaveBeenCalledWith({ url: 'https://example.invalid', token: 'tok' });
   });
 });

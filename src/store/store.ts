@@ -81,16 +81,19 @@ export function createUpstashStore(redis: Redis): Store {
   };
   const readFriend = async (id: string): Promise<Friend | undefined> =>
     parseJson<Friend>(await redis.get(`friend:${id}`));
+  const getFriend = async (id: string): Promise<Friend | undefined> => {
+    const f = await readFriend(id);
+    return f ? withManual(f, await readManual(id)) : undefined;
+  };
+  const listFriends = async (): Promise<Friend[]> => {
+    // auto-deserializing clients may return numeric-looking ids as numbers
+    const ids = ((await redis.smembers('friends')) as unknown[]).map((id) => String(id)).sort();
+    const all = await Promise.all(ids.map(getFriend));
+    return all.filter((f): f is Friend => f !== undefined);
+  };
   return {
-    async listFriends() {
-      const ids = ((await redis.smembers('friends')) as string[]).sort();
-      const all = await Promise.all(ids.map((id) => this.getFriend(id)));
-      return all.filter((f): f is Friend => f !== undefined);
-    },
-    async getFriend(id) {
-      const f = await readFriend(id);
-      return f ? withManual(f, await readManual(id)) : undefined;
-    },
+    listFriends,
+    getFriend,
     async saveFriend(f) {
       const merged = mergeSaved(f, await readFriend(f.id));
       await redis.set(`friend:${f.id}`, JSON.stringify(merged));
