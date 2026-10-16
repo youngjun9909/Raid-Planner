@@ -7,4 +7,4 @@ export type Tier = 'comfortable' | 'tight' | 'risky' | 'unknown';
 export type Slot = { kind: 'friend'; friendId: string; character: Character } | { kind: 'external'; role: Role };
 export interface Party { slots: Slot[]; dealerAvgCP: number | null; tier: Tier; }
 export interface Candidate { label: string; parties: Party[]; externalCount: number; imbalance: number; }
-export interface PlanResult { candidates: Candidate[]; excluded: { friendId: string; reason: string }[]; }
+export interface PlanResult { candidates: Candidate[]; excluded: { friendId: string; reason: string }[]; reason?: string; }
