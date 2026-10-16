@@ -1,4 +1,5 @@
 import { getStore } from '@/store/store';
+import { visibleFriend } from '@/core/visible';
 import { fetchRoster } from '@/lostark/client';
 import { errorResponse, guard, lostArkErrorResponse, withConfigErrors } from '@/lib/http';
 
@@ -15,7 +16,8 @@ export const POST = withConfigErrors(async (req: Request, ctx: { params: Promise
     const characters = await fetchRoster(friend.representativeName);
     // saveFriend keeps discordUserId; manual combat power overrides are stored separately.
     await store.saveFriend({ ...friend, characters });
-    return Response.json(await store.getFriend(id));
+    const saved = await store.getFriend(id);
+    return Response.json(saved && visibleFriend(saved));
   } catch (err) {
     return lostArkErrorResponse(err);
   }

@@ -212,6 +212,42 @@ describe.each([
     expect((await s.getFriend('f2'))!.proficiency).toEqual({ 'Gamma|세르카': '클경' });
   });
 
+  it('setTargetDifficulty: 저장한 가는 난이도가 friend.targetDifficulty에 붙고(키 "캐릭터|레이드"), null이면 자동(생략)으로', async () => {
+    await s.saveFriend(friend());
+    expect((await s.getFriend('f1'))!.targetDifficulty).toBeUndefined();
+    await s.setTargetDifficulty('f1', 'Alpha', '카제로스 4막 (아르모체)', '노말');
+    await s.setTargetDifficulty('f1', 'Alpha', '세르카', '안 감');
+    const want = { 'Alpha|카제로스 4막 (아르모체)': '노말', 'Alpha|세르카': '안 감' };
+    expect((await s.getFriend('f1'))!.targetDifficulty).toEqual(want);
+    expect((await s.listFriends())[0].targetDifficulty).toEqual(want);
+    await s.setTargetDifficulty('f1', 'Alpha', '세르카', '하드');
+    expect((await s.getFriend('f1'))!.targetDifficulty!['Alpha|세르카']).toBe('하드');
+    await s.setTargetDifficulty('f1', 'Alpha', '세르카', null);
+    await s.setTargetDifficulty('f1', 'Alpha', '카제로스 4막 (아르모체)', null);
+    expect((await s.getFriend('f1'))!.targetDifficulty).toBeUndefined();
+    expect(await s.getFriend('f1')).toEqual(friend());
+  });
+
+  it('가는 난이도는 로스터를 새로 저장해도 남고, saveFriend에 실린 targetDifficulty는 저장하지 않는다', async () => {
+    await s.saveFriend(friend());
+    await s.setTargetDifficulty('f1', 'Alpha', '세르카', '노말');
+    await s.saveFriend({ ...friend({ displayName: 'B' }), targetDifficulty: { 'Beta|세르카': '하드' } });
+    const f = (await s.getFriend('f1'))!;
+    expect(f.displayName).toBe('B');
+    expect(f.targetDifficulty).toEqual({ 'Alpha|세르카': '노말' });
+  });
+
+  it('가는 난이도는 친구마다 따로이고, deleteFriend가 지운다', async () => {
+    await s.saveFriend(friend());
+    await s.saveFriend(friend({ id: 'f2', representativeName: 'Gamma', characters: [{ name: 'Gamma', className: 'Bard', role: 'support', itemLevel: 1700, combatPower: 1 }] }));
+    await s.setTargetDifficulty('f1', 'Alpha', '세르카', '노말');
+    await s.setTargetDifficulty('f2', 'Gamma', '세르카', '안 감');
+    expect(await s.deleteFriend('f1', 'w1')).toBe(true);
+    await s.saveFriend(friend());
+    expect((await s.getFriend('f1'))!.targetDifficulty).toBeUndefined();
+    expect((await s.getFriend('f2'))!.targetDifficulty).toEqual({ 'Gamma|세르카': '안 감' });
+  });
+
   it('deleteWeek 후 getClears는 []', async () => {
     await s.setCharacterClears('w1', 'Alpha', [{ raidName: 'R1', difficulty: 'n' }]);
     await s.deleteWeek('w1');
@@ -225,6 +261,19 @@ describe('Upstash store with auto-deserializing client', () => {
     await s.saveFriend(friend({ id: '123456' }));
     expect((await s.getFriend('123456'))!.id).toBe('123456');
     expect((await s.listFriends()).map((f) => f.id)).toEqual(['123456']);
+  });
+
+  it('diff:<id> 해시에 잘못 들어간 값(모르는 레이드, 그 레이드에 없는 난이도, 문자열 아님)은 읽을 때 버린다', async () => {
+    for (const auto of [false, true]) {
+      const redis = fakeRedis(auto);
+      const s = createUpstashStore(redis);
+      await s.saveFriend(friend());
+      await redis.hset('diff:f1', {
+        'Alpha|세르카': '하드', 'Alpha|지평의 성당': '안 감', 'Alpha|없는 레이드': '하드',
+        'Beta|세르카': '3단계', 'Beta|벨가르딘': '12', 'nobar': '하드',
+      });
+      expect((await s.getFriend('f1'))!.targetDifficulty).toEqual({ 'Alpha|세르카': '하드', 'Alpha|지평의 성당': '안 감' });
+    }
   });
 
   it('구조분해한 메서드도 this 없이 동작한다', async () => {

@@ -1,4 +1,5 @@
 import { getStore } from '@/store/store';
+import { visibleCharacters, visibleFriend } from '@/core/visible';
 import { isProficiency, RAID_NAMES_FOR_PROFICIENCY } from '@/core/proficiency';
 import { badRequest, errorResponse, guard, isNonEmptyString, readJson, withConfigErrors } from '@/lib/http';
 
@@ -20,9 +21,10 @@ export const PUT = withConfigErrors(async (req: Request, ctx: { params: Promise<
   }
   const level = body.level;
   if (level !== null && !isProficiency(level)) return badRequest('숙련도는 숙련, 반숙, 클경 또는 null이어야 해요');
-  if (!friend.characters.some((c) => c.name === body.characterName)) {
+  if (!visibleCharacters(friend.characters).some((c) => c.name === body.characterName)) {
     return badRequest('이 친구의 캐릭터가 아니에요');
   }
   await store.setProficiency(id, body.characterName, body.raidName, level);
-  return Response.json(await store.getFriend(id));
+  const saved = await store.getFriend(id);
+  return Response.json(saved && visibleFriend(saved));
 });

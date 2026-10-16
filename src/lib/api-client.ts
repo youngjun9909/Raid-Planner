@@ -43,6 +43,9 @@ export const api = {
   /** 숙련도 (raidName은 난이도 없는 레이드 이름). null이면 기본값 반숙으로. */
   setProficiency: (pw: string, id: string, characterName: string, raidName: string, level: Proficiency | null) =>
     call<Friend>(pw, friendUrl(id, 'proficiency'), 'PUT', { characterName, raidName, level }),
+  /** 가는 난이도 (raidName은 난이도 없는 레이드 이름, difficulty는 그 레이드의 난이도 또는 '안 감'). null이면 자동으로. */
+  setTargetDifficulty: (pw: string, id: string, characterName: string, raidName: string, difficulty: string | null) =>
+    call<Friend>(pw, friendUrl(id, 'target-difficulty'), 'PUT', { characterName, raidName, difficulty }),
   getClears: (pw: string) => call<ClearRecord[]>(pw, '/api/clears'),
   putClears: (pw: string, characterName: string, records: ClearInput[]) =>
     call<{ ok: true }>(pw, '/api/clears', 'PUT', { characterName, records }),

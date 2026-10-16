@@ -6,6 +6,7 @@ import { RAIDS } from '@/core/raids';
 import { weekKey } from '@/core/week';
 import type { Candidate, Character, ClearRecord, Friend, Party, PlanResult, Proficiency, RaidConfig, Slot, Tier } from '@/core/types';
 import { DEFAULT_PROFICIENCY, NO_EXPERT_TEXT, partyProficiency, proficiencySummaryText, showProficiencyBadge } from '@/core/proficiency';
+import { visibleFriend } from '@/core/visible';
 import { countExternals, formatCP, formatLevel, formatRange, planSummaryText } from '@/lib/view-model';
 import { arrangeParty } from '@/lib/arrange-party';
 import { COMMAND_GROUPS, raidTitle, type CommandDef } from './commands';
@@ -340,6 +341,7 @@ const FRIENDS_PER_EMBED = 5;
 
 export function formatStatus(friends: Friend[], clears: ClearRecord[], now: Date): MessageParts {
   if (friends.length === 0) return { content: NO_FRIENDS_TEXT, embeds: [] };
+  friends = friends.map(visibleFriend); // 1700 미만 캐릭터는 숨긴다 (설계 수정 2026-10-16 B)
   const known = new Set(friends.flatMap((f) => f.characters.map((c) => c.name)));
   const total = clears.filter((r) => known.has(r.characterName)).length;
   const chunks: Friend[][] = [];

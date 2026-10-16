@@ -5,6 +5,7 @@ import { getRaid, RAIDS } from '@/core/raids';
 import { planRaid } from '@/core/planner';
 import { isProficiency, proficiencyLookup, RAID_NAMES_FOR_PROFICIENCY } from '@/core/proficiency';
 import { weekKey } from '@/core/week';
+import { visibleFriend } from '@/core/visible';
 import type { Character, ClearRecord, Friend, RaidConfig } from '@/core/types';
 import { applyClearChange, formatLevel } from '@/lib/view-model';
 import { getWebUrl } from '@/lib/web-url';
@@ -74,10 +75,15 @@ const only = (response: DiscordResponse): HandlerResult => ({ response });
 const invoker = (body: DiscordInteraction): DiscordUser | undefined => body.member?.user ?? body.user;
 const option = (body: DiscordInteraction, name: string): unknown => body.data?.options?.find((o) => o.name === name)?.value;
 
+/**
+ * 실행한 사람의 친구. 캐릭터는 화면에 보이는 것(1700 이상)만 담는다: 자동완성, /클리어 메뉴, /숙련도 확인이 모두 이 목록을 쓴다
+ * (설계 수정 2026-10-16 B). 등록 확인처럼 전체 원정대가 필요한 곳은 listFriends를 직접 쓴다.
+ */
 async function findMe(body: DiscordInteraction, store: Store): Promise<Friend | undefined> {
   const user = invoker(body);
   if (!user) return undefined;
-  return (await store.listFriends()).find((f) => f.discordUserId === user.id);
+  const me = (await store.listFriends()).find((f) => f.discordUserId === user.id);
+  return me && visibleFriend(me);
 }
 
 export async function handleInteraction(body: DiscordInteraction, deps: Deps): Promise<HandlerResult> {

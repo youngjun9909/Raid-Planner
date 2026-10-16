@@ -1,4 +1,5 @@
 import { getStore } from '@/store/store';
+import { visibleCharacters, visibleFriend } from '@/core/visible';
 import { badRequest, errorResponse, guard, isNonEmptyString, readJson, withConfigErrors } from '@/lib/http';
 
 export const PUT = withConfigErrors(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
@@ -14,9 +15,10 @@ export const PUT = withConfigErrors(async (req: Request, ctx: { params: Promise<
   if (cp !== null && !(typeof cp === 'number' && Number.isFinite(cp) && cp >= 0)) {
     return badRequest('전투력은 0 이상의 숫자이거나 null이어야 해요');
   }
-  if (!friend.characters.some((c) => c.name === body.characterName)) {
+  if (!visibleCharacters(friend.characters).some((c) => c.name === body.characterName)) {
     return badRequest('이 친구의 캐릭터가 아니에요');
   }
   await store.setManualCombatPower(id, body.characterName, cp);
-  return Response.json(await store.getFriend(id));
+  const saved = await store.getFriend(id);
+  return Response.json(saved && visibleFriend(saved));
 });

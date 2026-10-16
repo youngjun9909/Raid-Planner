@@ -28,12 +28,14 @@ describe('프로덕션에서 저장소 env가 없으면', () => {
     const plan = await import('@/app/api/plan/route');
     const cp = await import('@/app/api/friends/[id]/combat-power/route');
     const prof = await import('@/app/api/friends/[id]/proficiency/route');
+    const diff = await import('@/app/api/friends/[id]/target-difficulty/route');
     const params = { params: Promise.resolve({ id: 'a' }) };
     for (const res of [
       await clears.GET(req('/api/clears')),
       await plan.POST(req('/api/plan', 'POST', { raidId: 'serka-hard', attendeeIds: [] })),
       await cp.PUT(req('/api/friends/a/combat-power', 'PUT', { characterName: 'x', cp: 1 }), params),
       await prof.PUT(req('/api/friends/a/proficiency', 'PUT', { characterName: 'x', raidName: '세르카', level: '숙련' }), params),
+      await diff.PUT(req('/api/friends/a/target-difficulty', 'PUT', { characterName: 'x', raidName: '세르카', difficulty: '하드' }), params),
     ]) {
       expect(res.status).toBe(503);
       expect((await res.json()).error).toBe(STORE_MSG);

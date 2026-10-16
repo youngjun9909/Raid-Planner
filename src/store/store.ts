@@ -1,6 +1,7 @@
 import { Redis } from '@upstash/redis';
 import type { Character, ClearRecord, Friend, Proficiency, Role } from '@/core/types';
 import { isProficiency, proficiencyKey } from '@/core/proficiency';
+import { isTargetDifficultyFor, raidNameOfKey, targetDifficultyKey } from '@/core/difficulty';
 import { isProduction } from '@/lib/env';
 
 export interface Store {
@@ -16,7 +17,12 @@ export interface Store {
    */
   setProficiency(friendId: string, characterName: string, raidName: string, level: Proficiency | null): Promise<void>;
   /**
-   * 친구를 지운다: friend:<id>, friends 집합의 id, 수동 전투력/역할, 숙련도, 그리고 week 주에 기록된
+   * 캐릭터 × 레이드 이름의 가는 난이도 (난이도 이름 또는 `안 감`). null이면 지워 자동 기본값으로 돌아간다.
+   * 숙련도와 같은 방식: 로스터를 다시 저장해도 남고, 읽을 때 friend.targetDifficulty로 붙는다. 값 검사는 호출하는 쪽(API)이 한다.
+   */
+  setTargetDifficulty(friendId: string, characterName: string, raidName: string, value: string | null): Promise<void>;
+  /**
+   * 친구를 지운다: friend:<id>, friends 집합의 id, 수동 전투력/역할, 숙련도, 가는 난이도, 그리고 week 주에 기록된
    * 그 친구 캐릭터들의 클리어. 지난 주 기록은 주간 작업이 지운다. 없는 친구면 false.
    * (저장소는 시각을 모르므로 이번 주 key는 호출하는 쪽이 weekKey(now)로 넘긴다.)
    */
@@ -29,17 +35,32 @@ export interface Store {
 type Manual = Record<string, number>;
 type ManualRoles = Record<string, Role>;
 type Profs = Record<string, Proficiency>;
+type Diffs = Record<string, string>;
 type ClearBody = Omit<ClearRecord, 'characterName'>;
 
 const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
 const isRole = (v: unknown): v is Role => v === 'support' || v === 'dealer';
 
-/** 수동 전투력/역할을 덮어쓰고 수동 표시를 붙인다. 수동 값이 API 값보다 우선한다. 숙련도가 있으면 proficiency로 붙인다. */
-function withManual(f: Friend, manual: Manual, roles: ManualRoles = {}, profs: Profs = {}): Friend {
-  const { proficiency: _p, ...rest } = f;
+/** 저장된 가는 난이도 중 올바른 값만 (모르는 레이드, 그 레이드에 없는 난이도, 문자열 아님은 버린다). */
+function validDiffs(raw: Record<string, unknown>): Diffs {
+  const out: Diffs = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (k.includes('|') && isTargetDifficultyFor(raidNameOfKey(k), v)) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * 수동 전투력/역할을 덮어쓰고 수동 표시를 붙인다. 수동 값이 API 값보다 우선한다.
+ * 숙련도가 있으면 proficiency로, 가는 난이도가 있으면 targetDifficulty로 붙인다.
+ */
+function withManual(f: Friend, manual: Manual, roles: ManualRoles = {}, profs: Profs = {}, diffs: Diffs = {}): Friend {
+  const { proficiency: _p, targetDifficulty: _d, ...rest } = f;
+  const d = validDiffs(diffs);
   return {
     ...rest,
     ...(Object.keys(profs).length ? { proficiency: { ...profs } } : {}),
+    ...(Object.keys(d).length ? { targetDifficulty: d } : {}),
     characters: f.characters.map((c) => {
       const out: Character = { ...c };
       if (has(manual, c.name)) Object.assign(out, { combatPower: manual[c.name], manualCombatPower: true });
@@ -49,8 +70,8 @@ function withManual(f: Friend, manual: Manual, roles: ManualRoles = {}, profs: P
   };
 }
 
-/** 저장 직전: 읽을 때만 붙는 수동 표시와 숙련도는 버린다. */
-function stripMarks({ proficiency: _p, ...f }: Friend): Friend {
+/** 저장 직전: 읽을 때만 붙는 수동 표시, 숙련도, 가는 난이도는 버린다. */
+function stripMarks({ proficiency: _p, targetDifficulty: _d, ...f }: Friend): Friend {
   return {
     ...f,
     characters: f.characters.map(({ manualCombatPower: _cp, manualRole: _role, ...c }) => c),
@@ -74,8 +95,9 @@ export function createMemoryStore(): Store {
   const manual = new Map<string, Manual>();
   const roles = new Map<string, ManualRoles>();
   const profs = new Map<string, Profs>();
+  const diffs = new Map<string, Diffs>();
   const clears = new Map<string, Record<string, ClearBody[]>>();
-  const view = (f: Friend) => withManual(structuredClone(f), manual.get(f.id) ?? {}, roles.get(f.id) ?? {}, profs.get(f.id) ?? {});
+  const view = (f: Friend) => withManual(structuredClone(f), manual.get(f.id) ?? {}, roles.get(f.id) ?? {}, profs.get(f.id) ?? {}, diffs.get(f.id) ?? {});
   return {
     async listFriends() { return [...friends.values()].map(view); },
     async getFriend(id) { const f = friends.get(id); return f ? view(f) : undefined; },
@@ -96,6 +118,12 @@ export function createMemoryStore(): Store {
       if (level === null) delete m[key]; else m[key] = level;
       profs.set(friendId, m);
     },
+    async setTargetDifficulty(friendId, name, raidName, value) {
+      const m = { ...(diffs.get(friendId) ?? {}) };
+      const key = targetDifficultyKey(name, raidName);
+      if (value === null) delete m[key]; else m[key] = value;
+      diffs.set(friendId, m);
+    },
     async deleteFriend(id, week) {
       const f = friends.get(id);
       if (!f) return false;
@@ -103,6 +131,7 @@ export function createMemoryStore(): Store {
       manual.delete(id);
       roles.delete(id);
       profs.delete(id);
+      diffs.delete(id);
       const w = { ...(clears.get(week) ?? {}) };
       for (const c of f.characters) delete w[c.name];
       clears.set(week, w);
@@ -130,7 +159,7 @@ function parseJson<T>(v: unknown): T | undefined {
 // Redis methods used: get, set, del, sadd, srem, smembers, hget, hset, hgetall, hdel
 // Keys: friend:<id> (JSON), friends (set of ids), manual:<id> (hash name -> cp),
 //       role:<id> (hash name -> 'support'|'dealer'), prof:<id> (hash '<name>|<raidName>' -> '숙련'|'반숙'|'클경'),
-//       clears:<week> (hash name -> JSON)
+//       diff:<id> (hash '<name>|<raidName>' -> 난이도 이름 | '안 감'), clears:<week> (hash name -> JSON)
 export function createUpstashStore(redis: Redis): Store {
   const readManual = async (id: string): Promise<Manual> => {
     const raw = (await redis.hgetall(`manual:${id}`)) as Record<string, unknown> | null;
@@ -153,13 +182,15 @@ export function createUpstashStore(redis: Redis): Store {
     for (const [k, v] of Object.entries(raw ?? {})) if (isProficiency(v)) out[k] = v;
     return out;
   };
+  const readDiffs = async (id: string): Promise<Diffs> =>
+    validDiffs(((await redis.hgetall(`diff:${id}`)) as Record<string, unknown> | null) ?? {});
   const readFriend = async (id: string): Promise<Friend | undefined> =>
     parseJson<Friend>(await redis.get(`friend:${id}`));
   const getFriend = async (id: string): Promise<Friend | undefined> => {
     const f = await readFriend(id);
     if (!f) return undefined;
-    const [manual, roles, profs] = await Promise.all([readManual(id), readRoles(id), readProfs(id)]);
-    return withManual(f, manual, roles, profs);
+    const [manual, roles, profs, diffs] = await Promise.all([readManual(id), readRoles(id), readProfs(id), readDiffs(id)]);
+    return withManual(f, manual, roles, profs, diffs);
   };
   const listFriends = async (): Promise<Friend[]> => {
     // auto-deserializing clients may return numeric-looking ids as numbers; ids are only
@@ -189,12 +220,17 @@ export function createUpstashStore(redis: Redis): Store {
       if (level === null) await redis.hdel(`prof:${friendId}`, key);
       else await redis.hset(`prof:${friendId}`, { [key]: level });
     },
+    async setTargetDifficulty(friendId, name, raidName, value) {
+      const key = targetDifficultyKey(name, raidName);
+      if (value === null) await redis.hdel(`diff:${friendId}`, key);
+      else await redis.hset(`diff:${friendId}`, { [key]: value });
+    },
     async deleteFriend(id, week) {
       const f = await readFriend(id);
       if (!f) return false;
       const names = f.characters.map((c) => c.name);
       if (names.length) await redis.hdel(`clears:${week}`, ...names);
-      await redis.del(`manual:${id}`, `role:${id}`, `prof:${id}`);
+      await redis.del(`manual:${id}`, `role:${id}`, `prof:${id}`, `diff:${id}`);
       await redis.srem('friends', id);
       await redis.del(`friend:${id}`);
       return true;

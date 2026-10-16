@@ -561,3 +561,29 @@ describe('/숙련도', () => {
     });
   });
 });
+
+describe('1700 미만 캐릭터는 디스코드에서도 숨긴다 (설계 수정 B)', () => {
+  const low: Friend = { ...friendA, characters: [ch('A1'), ch('A-low', 'dealer', 3000, 1699), ch('A2-sup', 'support', 2500)] };
+  beforeEach(async () => { await store.saveFriend(low); });
+
+  it('/클리어 캐릭터 메뉴에 없다', async () => {
+    const r = await run(cmd('클리어'));
+    const select = r.response.data!.components![0].components[0] as StringSelect;
+    expect(select.options.map((o: any) => o.value)).toEqual(['A1', 'A2-sup']);
+  });
+
+  it('/현황에 없다', async () => {
+    const r = await run(cmd('현황'));
+    expect(all(r)).not.toContain('A-low');
+    expect(all(r)).toContain('**A1**');
+  });
+
+  it('/숙련도 자동완성에 없고, 직접 쳐도 바꿀 수 없다', async () => {
+    const r = await run({ type: 4, id: 'i3', application_id: 'app1', token: 't', ...user('u1'),
+      data: { name: '숙련도', options: [{ name: '캐릭터', type: 3, value: '', focused: true }] } });
+    expect(r.response.data!.choices!.map((c: any) => c.value)).toEqual(['A1', 'A2-sup']);
+    const set = await run(cmd('숙련도', [{ name: '캐릭터', value: 'A-low' }, { name: '레이드', value: '세르카' }, { name: '숙련도', value: '숙련' }]));
+    expect(set.response.data!.flags).toBe(64);
+    expect((await store.getFriend('fa'))!.proficiency).toBeUndefined();
+  });
+});

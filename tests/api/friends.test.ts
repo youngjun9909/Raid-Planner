@@ -5,6 +5,7 @@ import { POST as refresh } from '@/app/api/friends/[id]/refresh/route';
 import { PUT as putCp } from '@/app/api/friends/[id]/combat-power/route';
 import { PUT as putRole } from '@/app/api/friends/[id]/role/route';
 import { PUT as putProf } from '@/app/api/friends/[id]/proficiency/route';
+import { PUT as putDiff } from '@/app/api/friends/[id]/target-difficulty/route';
 import { DELETE as deleteFriend } from '@/app/api/friends/[id]/route';
 import { weekKey } from '@/core/week';
 import { LostArkError } from '@/lostark/client';
@@ -197,5 +198,71 @@ describe('PUT /api/friends/[id]/proficiency', () => {
     expect((await put('a', { characterName: 'A1', raidName: '세르카', level: '숙련' }, 'bad')).status).toBe(401);
     expect((await put('a', { characterName: 'A1', raidName: '세르카', level: '숙련' }, null)).status).toBe(401);
     expect((await store.getFriend('a'))!.proficiency).toBeUndefined();
+  });
+});
+
+describe('PUT /api/friends/[id]/target-difficulty', () => {
+  const ARMOCHE = '카제로스 4막 (아르모체)';
+  const put = (id: string, body: unknown, password?: string | null) =>
+    putDiff(req(`/api/friends/${id}/target-difficulty`, 'PUT', body, password), params(id));
+  const raw = (id: string, text: string) =>
+    putDiff(new Request(`http://localhost/api/friends/${id}/target-difficulty`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', 'x-app-password': 'secret' }, body: text,
+    }), params(id));
+  beforeEach(async () => { await store.saveFriend(friend('a', [ch('A1'), ch('A2'), ch('Low', 'dealer', 3000, 1650)])); });
+
+  it('가는 난이도를 저장하고(친구 응답의 targetDifficulty) GET /api/friends에도 실린다, null이면 자동으로', async () => {
+    const res = await put('a', { characterName: 'A1', raidName: ARMOCHE, difficulty: '노말' });
+    expect(res.status).toBe(200);
+    expect((await res.json()).targetDifficulty).toEqual({ [`A1|${ARMOCHE}`]: '노말' });
+    expect((await put('a', { characterName: 'A2', raidName: '세르카', difficulty: '안 감' })).status).toBe(200);
+    const list = await (await getFriends(req('/api/friends'))).json();
+    expect(list[0].targetDifficulty).toEqual({ [`A1|${ARMOCHE}`]: '노말', 'A2|세르카': '안 감' });
+    const reset = await put('a', { characterName: 'A1', raidName: ARMOCHE, difficulty: null });
+    expect(reset.status).toBe(200);
+    expect((await reset.json()).targetDifficulty).toEqual({ 'A2|세르카': '안 감' });
+  });
+
+  it('검증 오류: 없는 친구 404(본문보다 먼저), 형식/레이드/난이도/캐릭터 400, 비밀번호 401', async () => {
+    expect((await put('zz', { characterName: 'A1', raidName: '세르카', difficulty: '하드' })).status).toBe(404);
+    expect((await raw('zz', '{not json')).status).toBe(404);
+    expect((await raw('a', '{not json')).status).toBe(400);
+    expect((await raw('a', '[1]')).status).toBe(400);
+    const badRaid = await put('a', { characterName: 'A1', raidName: '없는 레이드', difficulty: '하드' });
+    expect(badRaid.status).toBe(400);
+    expect(await badRaid.json()).toEqual({ error: '알 수 없는 레이드예요' });
+    expect((await put('a', { characterName: 'A1', raidName: 'serka-hard', difficulty: '하드' })).status).toBe(400);
+    const badDiff = await put('a', { characterName: 'A1', raidName: '세르카', difficulty: '3단계' });
+    expect(badDiff.status).toBe(400);
+    expect((await badDiff.json()).error).toContain('세르카');
+    expect((await put('a', { characterName: 'A1', raidName: '세르카' })).status).toBe(400);
+    expect((await put('a', { characterName: 'A1', raidName: '세르카', difficulty: 3 })).status).toBe(400);
+    expect((await put('a', { raidName: '세르카', difficulty: '하드' })).status).toBe(400);
+    const notMine = await put('a', { characterName: 'Nope', raidName: '세르카', difficulty: '하드' });
+    expect(notMine.status).toBe(400);
+    expect(await notMine.json()).toEqual({ error: '이 친구의 캐릭터가 아니에요' });
+    // 1700 미만(화면에 안 보이는) 캐릭터는 어느 화면에서도 고칠 수 없으므로 받지 않는다
+    expect((await put('a', { characterName: 'Low', raidName: '세르카', difficulty: '안 감' })).status).toBe(400);
+    expect((await put('a', { characterName: 'A1', raidName: '세르카', difficulty: '하드' }, 'bad')).status).toBe(401);
+    expect((await put('a', { characterName: 'A1', raidName: '세르카', difficulty: '하드' }, null)).status).toBe(401);
+    expect((await store.getFriend('a'))!.targetDifficulty).toBeUndefined();
+  });
+});
+
+describe('1700 미만 캐릭터는 응답에서 숨긴다 (설계 수정 B)', () => {
+  beforeEach(async () => {
+    await store.saveFriend(friend('a', [ch('A1'), ch('Low', 'dealer', 3000, 1699.99), ch('Edge', 'support', null, 1700)]));
+  });
+  it('GET /api/friends의 characters에는 1700 이상만 (저장소에는 남는다)', async () => {
+    const list = await (await getFriends(req('/api/friends'))).json();
+    expect(list[0].characters.map((c: { name: string }) => c.name)).toEqual(['A1', 'Edge']);
+    expect((await store.getFriend('a'))!.characters).toHaveLength(3);
+  });
+  it('수동 전투력/역할/숙련도 응답에도 숨긴 캐릭터가 없고, 숨긴 캐릭터는 고칠 수 없다(400)', async () => {
+    const cp = await putCp(req('/api/friends/a/combat-power', 'PUT', { characterName: 'A1', cp: 1 }), params('a'));
+    expect((await cp.json()).characters.map((c: { name: string }) => c.name)).toEqual(['A1', 'Edge']);
+    expect((await putCp(req('/api/friends/a/combat-power', 'PUT', { characterName: 'Low', cp: 1 }), params('a'))).status).toBe(400);
+    expect((await putRole(req('/api/friends/a/role', 'PUT', { characterName: 'Low', role: 'support' }), params('a'))).status).toBe(400);
+    expect((await putProf(req('/api/friends/a/proficiency', 'PUT', { characterName: 'Low', raidName: '세르카', level: '숙련' }), params('a'))).status).toBe(400);
   });
 });

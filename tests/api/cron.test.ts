@@ -65,6 +65,14 @@ describe('runWeekly', () => {
     expect((await store.getFriend('f1'))!.proficiency).toEqual({ 'A|세르카': '숙련' });
   });
 
+  it('주간 갱신 뒤에도 가는 난이도가 남는다', async () => {
+    const store = createMemoryStore();
+    await store.saveFriend(friend('f1', [ch('A')]));
+    await store.setTargetDifficulty('f1', 'A', '세르카', '노말');
+    await runWeekly({ store, fetchRoster: async () => [ch('A'), ch('B')], now: () => NOW });
+    expect((await store.getFriend('f1'))!.targetDifficulty).toEqual({ 'A|세르카': '노말' });
+  });
+
   it('한 친구의 갱신이 실패해도 나머지는 갱신된다', async () => {
     const store = createMemoryStore();
     await store.saveFriend(friend('f1', [ch('A')]));

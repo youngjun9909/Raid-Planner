@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getStore } from '@/store/store';
+import { visibleFriend } from '@/core/visible';
 import { fetchRoster } from '@/lostark/client';
 import { findOwner } from '@/lib/friend-dupes';
 import { badRequest, errorResponse, guard, isNonEmptyString, lostArkErrorResponse, readJson, withConfigErrors } from '@/lib/http';
@@ -11,7 +12,8 @@ const duplicate = () => errorResponse('이미 등록된 캐릭터예요', 409);
 export const GET = withConfigErrors(async (req: Request) => {
   const denied = guard(req);
   if (denied) return denied;
-  return Response.json(await getStore().listFriends());
+  // 1700 미만 캐릭터는 화면에 보이지 않게 응답에서 뺀다 (저장소에는 남는다; 설계 수정 2026-10-16 B).
+  return Response.json((await getStore().listFriends()).map(visibleFriend));
 });
 
 export const POST = withConfigErrors(async (req: Request) => {
@@ -31,7 +33,7 @@ export const POST = withConfigErrors(async (req: Request) => {
     if (findOwner(await store.listFriends(), characters.map((c) => c.name))) return duplicate();
     const friend = { id: randomUUID(), displayName, representativeName, characters };
     await store.saveFriend(friend);
-    return Response.json(friend);
+    return Response.json(visibleFriend(friend));
   } catch (err) {
     return lostArkErrorResponse(err);
   }
