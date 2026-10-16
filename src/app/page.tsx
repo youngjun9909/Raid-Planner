@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RAIDS } from '@/core/raids';
 import type { ClearRecord, Friend } from '@/core/types';
-import { ApiError, api } from '@/lib/api-client';
+import { ApiError, api, type ClearInput } from '@/lib/api-client';
 import { applyClearChange, recordsAfterChange } from '@/lib/view-model';
+import { createSaveQueue } from '@/lib/save-queue';
 import { PasswordGate, readStoredPassword, storePassword } from '@/components/PasswordGate';
 import { FriendsPanel } from '@/components/FriendsPanel';
 import { ClearsTable } from '@/components/ClearsTable';
@@ -40,12 +41,25 @@ export default function Home() {
   const [plans, setPlans] = useState<Record<string, PlanState>>({});
   const [resetIn, setResetIn] = useState<string | null>(null);
 
+  // 클리어는 연달아 바뀔 수 있어 렌더를 기다리지 않고 최신 값을 ref로도 들고 있는다.
+  const clearsRef = useRef<ClearRecord[]>([]);
+  const commitClears = useCallback((next: ClearRecord[]) => {
+    clearsRef.current = next;
+    setClears(next);
+  }, []);
+  // 캐릭터별로 PUT을 하나씩 보내고, 대기 중인 변경은 최신 기록 하나로 합친다.
+  const [clearQueue] = useState(() =>
+    createSaveQueue<{ password: string; records: ClearInput[] }>((characterName, v) =>
+      api.putClears(v.password, characterName, v.records).then(() => undefined),
+    ),
+  );
+
   const load = useCallback(async (pw: string) => {
     const [f, c] = await Promise.all([api.listFriends(pw), api.getClears(pw)]);
     setFriends(f);
-    setClears(c);
+    commitClears(c);
     setLoadError(null);
-  }, []);
+  }, [commitClears]);
 
   /** 비밀번호가 바뀌어 401이 오면 입력창으로 돌아간다. */
   const handle = useCallback((e: unknown): string => {
@@ -126,15 +140,27 @@ export default function Home() {
 
   async function changeClear(characterName: string, raidName: string, difficulty: string) {
     if (!password) return;
-    const records = recordsAfterChange(clears, characterName, raidName, difficulty);
-    setClears((prev) => applyClearChange(prev, characterName, records));
+    const records = recordsAfterChange(clearsRef.current, characterName, raidName, difficulty);
+    commitClears(applyClearChange(clearsRef.current, characterName, records));
     setNotice(null);
-    try {
-      await api.putClears(password, characterName, records);
+    const res = await clearQueue.save(characterName, { password, records });
+    if (res.ok) {
       setVersion((v) => v + 1);
-    } catch (e) {
-      setNotice(`${characterName}의 클리어 표시를 저장하지 못했어요: ${handle(e)}`);
-      api.getClears(password).then(setClears).catch(() => {});
+      return;
+    }
+    // 더 새 변경이 대기 중이면 그 저장이 이 값을 대신하므로 되돌리지 않는다.
+    if (res.superseded) return;
+    setNotice(`${characterName}의 클리어 표시를 저장하지 못했어요: ${handle(res.error)}`);
+    try {
+      const server = await api.getClears(password);
+      // 재조회 사이에 새 변경이 생겼으면 그 낙관적 상태를 지키고, 이 캐릭터 기록만 서버 값으로 맞춘다.
+      if (clearQueue.isBusy(characterName)) return;
+      const mine = server
+        .filter((c) => c.characterName === characterName)
+        .map(({ raidName: r, difficulty: d }) => ({ raidName: r, difficulty: d }));
+      commitClears(applyClearChange(clearsRef.current, characterName, mine));
+    } catch {
+      /* 재조회도 실패하면 안내 문구만 남긴다 */
     }
   }
 

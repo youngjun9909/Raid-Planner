@@ -39,7 +39,17 @@ function PartyBlock({ party, index, names }: { party: Party; index: number; name
   );
 }
 
-export function CandidateCard({ candidate, rank, friends }: { candidate: Candidate; rank: number; friends: Friend[] }) {
+export function CandidateCard({
+  candidate,
+  rank,
+  friends,
+  raidId,
+}: {
+  candidate: Candidate;
+  rank: number;
+  friends: Friend[];
+  raidId: string;
+}) {
   const names = new Map(friends.map((f) => [f.id, f.displayName]));
   const ext = candidate.parties.reduce(
     (acc, p) => {
@@ -48,7 +58,7 @@ export function CandidateCard({ candidate, rank, friends }: { candidate: Candida
     },
     { support: 0, dealer: 0 },
   );
-  const titleId = `cand-${rank}-${candidate.label}`;
+  const titleId = `cand-${raidId}-${rank}`; // 레이드마다 섹션이 따로 있어 레이드 id를 넣어야 겹치지 않는다
   return (
     <article className="candidate" aria-labelledby={titleId}>
       <header className="candidate__head">

@@ -19,6 +19,7 @@ type Call = { url: string; method: string; body: unknown; password: string | nul
 let calls: Call[];
 let clears: ClearRecord[];
 let planResult: PlanResult;
+let putResponder: ((body: { characterName: string; records: unknown[] }) => Promise<Response>) | null;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -27,6 +28,7 @@ beforeEach(() => {
   calls = [];
   clears = [];
   planResult = { candidates: [], excluded: [] };
+  putResponder = null;
   localStorage.setItem(PASSWORD_KEY, 'pw');
   vi.stubGlobal(
     'fetch',
@@ -37,7 +39,7 @@ beforeEach(() => {
       calls.push({ url, method, body, password });
       if (url === '/api/friends' && method === 'GET') return json(FRIENDS);
       if (url === '/api/clears' && method === 'GET') return json(clears);
-      if (url === '/api/clears' && method === 'PUT') return json({ ok: true });
+      if (url === '/api/clears' && method === 'PUT') return putResponder ? putResponder(body) : json({ ok: true });
       if (url === '/api/plan') return json({ ...planResult, raid: { id: body.raidId } });
       if (url.endsWith('/combat-power')) {
         const f = structuredClone(FRIENDS[0]);
@@ -189,5 +191,105 @@ describe('웹 화면', () => {
     vi.mocked(fetch).mockImplementation(async (url) => json(url === '/api/friends' ? [] : []));
     render(<Home />);
     expect(await screen.findByText(/아직 등록된 친구가 없어요/)).toBeInTheDocument();
+  });
+
+  describe('같은 캐릭터의 클리어 저장 순서', () => {
+    type Gate = { body: { characterName: string; records: unknown[] }; ok: () => void; fail: () => void };
+    let gates: Gate[];
+    let server: Record<string, unknown[]>;
+    const putBodies = () => calls.filter((c) => c.url === '/api/clears' && c.method === 'PUT').map((c) => c.body);
+    const clearGets = () => calls.filter((c) => c.url === '/api/clears' && c.method === 'GET');
+    const select = (raid: string) => screen.getByRole('combobox', { name: `가나 ${raid} 클리어` }) as HTMLSelectElement;
+
+    beforeEach(() => {
+      gates = [];
+      server = {};
+      putResponder = (body) =>
+        new Promise<Response>((resolve) => {
+          gates.push({
+            body,
+            ok: () => {
+              server[body.characterName] = body.records; // 응답이 도착한 순서대로 서버 상태가 바뀐다고 본다
+              resolve(json({ ok: true }));
+            },
+            fail: () => resolve(json({ error: '저장 실패' }, 500)),
+          });
+        });
+    });
+
+    it('두 번 연달아 바꾸면 두 번째 저장은 첫 번째가 끝난 뒤 최신 기록 전체로 보낸다', async () => {
+      await renderLoaded();
+      fireEvent.change(select('세르카'), { target: { value: '노말' } });
+      await waitFor(() => expect(gates).toHaveLength(1));
+      fireEvent.change(select('벨가르딘'), { target: { value: '하드' } });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(putBodies()).toHaveLength(1); // 첫 요청이 끝나기 전에는 두 번째를 보내지 않는다
+
+      gates[0].ok();
+      await waitFor(() => expect(gates).toHaveLength(2));
+      gates[1].ok();
+      await waitFor(() => expect(server['가나']).toHaveLength(2));
+      expect(putBodies()).toEqual([
+        { characterName: '가나', records: [{ raidName: '세르카', difficulty: '노말' }] },
+        {
+          characterName: '가나',
+          records: [
+            { raidName: '세르카', difficulty: '노말' },
+            { raidName: '벨가르딘', difficulty: '하드' },
+          ],
+        },
+      ]);
+      expect(server['가나']).toEqual([
+        { raidName: '세르카', difficulty: '노말' },
+        { raidName: '벨가르딘', difficulty: '하드' },
+      ]);
+      expect(select('세르카').value).toBe('노말');
+      expect(select('벨가르딘').value).toBe('하드');
+    });
+
+    it('첫 저장이 실패해도 대기 중인 새 변경을 서버 값으로 덮어쓰지 않는다', async () => {
+      await renderLoaded();
+      fireEvent.change(select('세르카'), { target: { value: '노말' } });
+      await waitFor(() => expect(gates).toHaveLength(1));
+      fireEvent.change(select('벨가르딘'), { target: { value: '하드' } });
+      gates[0].fail();
+      await waitFor(() => expect(gates).toHaveLength(2));
+      expect(gates[1].body.records).toHaveLength(2);
+      gates[1].ok();
+      await waitFor(() => expect(server['가나']).toHaveLength(2));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(clearGets()).toHaveLength(1); // 처음 불러온 것 말고는 되돌리기용 재조회가 없다
+      expect(select('세르카').value).toBe('노말');
+      expect(select('벨가르딘').value).toBe('하드');
+      expect(screen.queryByText(/저장하지 못했어요/)).not.toBeInTheDocument();
+    });
+
+    it('대기 중인 변경 없이 실패하면 서버 값으로 되돌리고 안내한다', async () => {
+      await renderLoaded();
+      fireEvent.change(select('세르카'), { target: { value: '노말' } });
+      await waitFor(() => expect(gates).toHaveLength(1));
+      gates[0].fail();
+      expect(await screen.findByText(/저장하지 못했어요: 저장 실패/)).toBeInTheDocument();
+      await waitFor(() => expect(clearGets()).toHaveLength(2));
+      await waitFor(() => expect(select('세르카').value).toBe(''));
+    });
+  });
+
+  it('여러 레이드를 고르면 후보 카드 제목 id가 겹치지 않는다', async () => {
+    planResult = {
+      candidates: [{ label: '2', externalCount: 6, imbalance: 0, parties: [{ slots: [], dealerAvgCP: null, tier: 'unknown' }] }],
+      excluded: [],
+    };
+    await renderLoaded();
+    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 노말' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '벨가르딘 노말' }));
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2));
+    const ids = screen.getAllByRole('article').map((a) => a.getAttribute('aria-labelledby')!);
+    expect(new Set(ids).size).toBe(2);
+    for (const a of screen.getAllByRole('article')) {
+      const id = a.getAttribute('aria-labelledby')!;
+      expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);
+      expect(a.querySelector(`[id="${id}"]`)).not.toBeNull();
+    }
   });
 });

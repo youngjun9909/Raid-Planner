@@ -61,7 +61,7 @@ function RaidPlan({ raidId, state, friends }: { raidId: string; state: PlanState
       {data && data.candidates.length > 0 && (
         <div className={`candidates${loading ? ' candidates--stale' : ''}`}>
           {data.candidates.map((c, i) => (
-            <CandidateCard key={i} candidate={c} rank={i} friends={friends} />
+            <CandidateCard key={i} candidate={c} rank={i} friends={friends} raidId={raid.id} />
           ))}
         </div>
       )}
