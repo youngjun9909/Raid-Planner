@@ -12,14 +12,18 @@
  *  4. Engraving names (for detectRole) may live under ArkPassive.Effects[].Name/Description;
  *     exact location unknown, so we collect strings defensively.
  *  5. Rate limit 100 req/min -> sequential profile calls with a gap (default 700ms); 429 aborts.
+ *     Characters below the lowest raid minLevel get no profile call (combatPower null).
  *  6. Role detection is by class: SUPPORT_CLASSES (홀리나이트, 도화가, 바드, 발키리) is
  *     user-confirmed (2026-10-16). Odd cases use the manual role override (PUT /api/friends/[id]/role).
  *     Engravings are still collected but not used.
  */
 import type { Character, Role } from '@/core/types';
-import { SUPPORT_CLASSES } from '@/core/raids';
+import { RAIDS, SUPPORT_CLASSES } from '@/core/raids';
 
 const BASE_URL = 'https://developer-lostark.game.onstove.com';
+
+/** 가장 낮은 레이드 입장 레벨. 이보다 낮은 캐릭터는 프로필(전투력)을 조회하지 않는다. */
+export const MIN_RAID_LEVEL = Math.min(...RAIDS.map((r) => r.minLevel));
 
 const MESSAGES = {
   not_found: '캐릭터를 찾을 수 없어요',
@@ -103,22 +107,27 @@ export async function fetchRoster(representativeName: string, opts: FetchRosterO
   if (!Array.isArray(siblings) || siblings.length === 0) throw new LostArkError('not_found');
 
   const roster: Character[] = [];
+  let profileCalls = 0;
   for (const s of siblings as any[]) {
     const name = String(s?.CharacterName ?? '');
     if (!name) continue;
     const className = String(s?.CharacterClassName ?? '');
-    if (roster.length > 0) await sleep(delayMs);
+    const itemLevel = parseItemLevel(s?.ItemAvgLevel);
     let combatPower: number | null = null;
     let engravings: string[] = [];
-    try {
-      const profile: any = await get(`${BASE_URL}/armories/characters/${encodeURIComponent(name)}/profiles`, token, f);
-      combatPower = parseCombatPower(profile?.CombatPower);
-      engravings = collectEngravings(profile);
-    } catch (e) {
-      // Per-character not_found/unknown are tolerated; auth and rate limit abort.
-      if (e instanceof LostArkError && (e.code === 'rate_limited' || e.code === 'unauthorized')) throw e;
+    // 어떤 레이드에도 못 들어가는 캐릭터는 전투력이 필요 없으니 프로필을 부르지 않는다 (주간 크론 시간/요청 수 절약).
+    if (itemLevel >= MIN_RAID_LEVEL) {
+      if (profileCalls++ > 0) await sleep(delayMs);
+      try {
+        const profile: any = await get(`${BASE_URL}/armories/characters/${encodeURIComponent(name)}/profiles`, token, f);
+        combatPower = parseCombatPower(profile?.CombatPower);
+        engravings = collectEngravings(profile);
+      } catch (e) {
+        // Per-character not_found/unknown are tolerated; auth and rate limit abort.
+        if (e instanceof LostArkError && (e.code === 'rate_limited' || e.code === 'unauthorized')) throw e;
+      }
     }
-    roster.push({ name, className, role: detectRole(className, engravings), itemLevel: parseItemLevel(s?.ItemAvgLevel), combatPower });
+    roster.push({ name, className, role: detectRole(className, engravings), itemLevel, combatPower });
   }
   return roster;
 }

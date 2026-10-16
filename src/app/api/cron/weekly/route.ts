@@ -4,7 +4,9 @@ import { fetchRoster } from '@/lostark/client';
 import { runWeekly } from '@/lib/weekly';
 import { withConfigErrors } from '@/lib/http';
 
-export const maxDuration = 60;
+// 친구 수 x 캐릭터 수만큼 프로필을 0.7초 간격으로 부르므로 60초를 넘을 수 있다.
+// Vercel Hobby + Fluid compute는 300초까지 허용한다 (Fluid compute가 꺼져 있으면 더 낮은 한도가 적용된다).
+export const maxDuration = 300;
 
 function authorized(req: Request): boolean {
   const secret = process.env.CRON_SECRET;

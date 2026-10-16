@@ -78,15 +78,50 @@ describe('runWeekly', () => {
     await store.saveFriend(friend('f1', [ch('A')]));
     await store.saveFriend(friend('f2', [ch('B')]));
     await store.saveFriend(friend('f3', [ch('C')]));
+    let n = 0;
     const fetchRoster = vi.fn(async (name: string) => {
-      if (name === 'B') throw new LostArkError('rate_limited');
+      if (++n === 2) throw new LostArkError('rate_limited');
       return [ch(name)];
     });
     const res = await runWeekly({ store, fetchRoster, now: () => NOW });
     expect(fetchRoster).toHaveBeenCalledTimes(2);
     expect(res.refreshed).toBe(1);
-    expect(res.failed.map((x) => x.friendId)).toEqual(['f2', 'f3']);
+    expect(res.failed).toHaveLength(2);
     expect(res.failed.every((x) => x.error === 'rate_limited')).toBe(true);
+    // 갱신된 친구 + 실패한 친구 = 전체
+    const byName: Record<string, string> = { A: 'f1', B: 'f2', C: 'f3' };
+    const first = byName[fetchRoster.mock.calls[0][0]];
+    expect(new Set([first, ...res.failed.map((x) => x.friendId)])).toEqual(new Set(['f1', 'f2', 'f3']));
+  });
+
+  describe('공정한 갱신 순서 (주차마다 시작 위치를 돌린다)', () => {
+    const setup = async (count: number) => {
+      const store = createMemoryStore();
+      for (let i = 0; i < count; i++) await store.saveFriend(friend(`f${i}`, [ch(`N${i}`)]));
+      return store;
+    };
+    const order = async (now: Date, count = 5) => {
+      const store = await setup(count);
+      const fetchRoster = vi.fn(async (name: string) => [ch(name)]);
+      const res = await runWeekly({ store, fetchRoster, now: () => now });
+      return { names: fetchRoster.mock.calls.map((c) => c[0] as string), res };
+    };
+
+    it('같은 주에는 항상 같은 순서이고, 한 번 끝까지 돌면 모든 친구를 한 번씩 갱신한다', async () => {
+      const a = await order(NOW);
+      const b = await order(new Date(NOW.getTime() + 3600_000)); // 같은 주
+      expect(a.names).toEqual(b.names);
+      expect([...a.names].sort()).toEqual(['N0', 'N1', 'N2', 'N3', 'N4']);
+      expect(a.res).toMatchObject({ refreshed: 5, failed: [] });
+      // 순서는 정렬된 목록을 한 칸씩 돌린 것
+      for (let i = 1; i < 5; i++) expect(a.names[i]).toBe(`N${(Number(a.names[0].slice(1)) + i) % 5}`);
+    });
+
+    it('주가 바뀌면 시작하는 친구가 달라진다 (같은 친구만 늘 뒤로 밀리지 않음)', async () => {
+      const firsts = new Set<string>();
+      for (let w = 0; w < 8; w++) firsts.add((await order(new Date(NOW.getTime() + w * 7 * 86400000))).names[0]);
+      expect(firsts.size).toBeGreaterThan(1);
+    });
   });
 
   it('요약에 토큰이나 예외 원문이 들어가지 않는다', async () => {
@@ -96,6 +131,14 @@ describe('runWeekly', () => {
     const res = await runWeekly({ store, fetchRoster, now: () => NOW });
     expect(JSON.stringify(res)).not.toMatch(/eyJ|bearer|SECRET/i);
     expect(res.failed).toHaveLength(1);
+  });
+});
+
+describe('maxDuration', () => {
+  it('주간 크론은 300초, 원정대 조회 라우트는 60초', async () => {
+    expect((await import('@/app/api/cron/weekly/route')).maxDuration).toBe(300);
+    expect((await import('@/app/api/friends/route')).maxDuration).toBe(60);
+    expect((await import('@/app/api/friends/[id]/refresh/route')).maxDuration).toBe(60);
   });
 });
 

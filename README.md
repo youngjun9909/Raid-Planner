@@ -74,6 +74,8 @@ node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 
 이 저장소의 `vercel.json`이 매주 수요일 06:00(KST) = 화요일 21:00(UTC)에 `/api/cron/weekly`를 부르도록 설정해 둬요. 이 작업은 지난주 클리어 기록을 지우고 친구들의 원정대 정보를 새로 불러와요(수동 입력한 전투력과 디스코드 연결은 유지돼요). Vercel은 `CRON_SECRET`이 있으면 자동으로 인증 헤더를 붙여 줘요.
 
+주간 작업은 친구 수 x 캐릭터 수만큼 로스트아크 API를 부르므로 오래 걸릴 수 있어서 최대 실행 시간을 300초로 잡아 뒀어요(`maxDuration = 300`). Vercel 무료(Hobby) 플랜은 **Fluid compute**가 켜져 있을 때 300초까지 허용해요(새 프로젝트는 기본으로 켜져 있어요. **Settings → Functions**에서 확인). Fluid compute가 꺼져 있으면 더 낮은 한도가 적용돼 친구가 많을 때 중간에 끊길 수 있어요. 끊기더라도 매주 갱신을 시작하는 친구를 바꿔 가며 돌기 때문에 같은 친구만 계속 빠지지는 않아요. 입장 레벨(가장 낮은 레이드 기준)에 못 미치는 캐릭터는 전투력을 조회하지 않아 요청 수도 줄여요.
+
 ## 5. 디스코드에 주소 연결
 
 1. 디스코드 개발자 포털 → 내 앱 → **General Information**의 **Interactions Endpoint URL**에 `https://<도메인>/api/discord` 를 넣고 저장해요.

@@ -4,6 +4,7 @@ import siblings from './fixtures/siblings.json';
 import berserker from './fixtures/profile-berserker.json';
 import artist from './fixtures/profile-artist.json';
 import nocp from './fixtures/profile-nocp.json';
+import { RAIDS } from '@/core/raids';
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
@@ -42,8 +43,8 @@ describe('fetchRoster', () => {
   it('원정대 응답을 Character[]로 정규화한다', async () => {
     const { fetchImpl } = router();
     const r = await fetchRoster('대표', { ...base, fetchImpl });
-    expect(r[0]).toEqual({ name: '가명버서커', className: '버서커', role: 'dealer', itemLevel: 1620, combatPower: 3150.25 });
-    expect(r[1]).toMatchObject({ name: '가명도화가', role: 'support', itemLevel: 1590.5, combatPower: 2100 });
+    expect(r[0]).toEqual({ name: '가명버서커', className: '버서커', role: 'dealer', itemLevel: 1720, combatPower: 3150.25 });
+    expect(r[1]).toMatchObject({ name: '가명도화가', role: 'support', itemLevel: 1710.5, combatPower: 2100 });
     expect(r[2]).toMatchObject({ role: 'dealer', itemLevel: 0, combatPower: null });
   });
   it('404/빈 응답이면 not_found', async () => {
@@ -81,7 +82,26 @@ describe('fetchRoster', () => {
     const { fetchImpl } = router();
     await fetchRoster('x', { token: 't', fetchImpl, sleep, delayMs: 700 });
     expect(sleep).toHaveBeenCalledWith(700);
-    expect(sleep).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1); // 프로필 호출 2번 사이에 한 번 (레벨 미달 캐릭터는 호출 없음)
+  });
+  it('가장 낮은 레이드 입장 레벨 미만인 캐릭터는 프로필을 부르지 않고 combatPower null로 남긴다', async () => {
+    const minLevel = Math.min(...RAIDS.map((x) => x.minLevel));
+    const rows = [
+      { ServerName: '루페온', CharacterName: '본캐', CharacterClassName: '버서커', ItemAvgLevel: String(minLevel) },
+      { ServerName: '루페온', CharacterName: '부캐', CharacterClassName: '바드', ItemAvgLevel: String(minLevel - 0.01) },
+      { ServerName: '루페온', CharacterName: '창고', CharacterClassName: '버서커', ItemAvgLevel: '1,100.00' },
+    ];
+    // '/siblings'가 먼저 매치되므로 본캐 프로필 경로에만 berserker 응답이 간다
+    const { fetchImpl, calls } = router({ '/siblings': json(rows), [encodeURIComponent('본캐')]: json(berserker) });
+    const r = await fetchRoster('본캐', { ...base, fetchImpl });
+    const profileCalls = calls.filter((c) => c.url.includes('/profiles'));
+    expect(profileCalls).toHaveLength(1);
+    expect(profileCalls[0].url).toContain(encodeURIComponent('본캐'));
+    expect(r.map((c) => [c.name, c.role, c.combatPower])).toEqual([
+      ['본캐', 'dealer', 3150.25],
+      ['부캐', 'support', null],
+      ['창고', 'dealer', null],
+    ]);
   });
   it('개별 프로필 실패(500)는 combatPower null로 허용', async () => {
     const { fetchImpl } = router({ '/profiles': json({}, 500) });
