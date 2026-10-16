@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RAIDS } from '@/core/raids';
-import type { ClearRecord, Friend, Role } from '@/core/types';
+import type { ClearRecord, Friend, Proficiency, Role } from '@/core/types';
+import { proficiencyKey } from '@/core/proficiency';
 import { ApiError, api, type ClearInput } from '@/lib/api-client';
-import { applyClearChange, recordsAfterChange } from '@/lib/view-model';
+import { applyClearChange, recordsAfterChange, withProficiency } from '@/lib/view-model';
 import { createSaveQueue } from '@/lib/save-queue';
 import { PasswordGate, readStoredPassword, storePassword } from '@/components/PasswordGate';
 import { FriendsPanel } from '@/components/FriendsPanel';
@@ -54,6 +55,14 @@ export default function Home() {
   const [clearQueue] = useState(() =>
     createSaveQueue<{ password: string; records: ClearInput[] }>((characterName, v) =>
       api.putClears(v.password, characterName, v.records).then(() => undefined),
+    ),
+  );
+
+  // 숙련도는 칸(친구 × 캐릭터 × 레이드 이름)마다 하나씩 순서대로 저장하고, 대기 중인 변경은 최신 값 하나로 합친다.
+  type ProfSave = { password: string; friendId: string; characterName: string; raidName: string; level: Proficiency | null };
+  const [profQueue] = useState(() =>
+    createSaveQueue<ProfSave>((_cell, v) =>
+      api.setProficiency(v.password, v.friendId, v.characterName, v.raidName, v.level).then(() => undefined),
     ),
   );
 
@@ -181,6 +190,29 @@ export default function Home() {
         .filter((c) => c.characterName === characterName)
         .map(({ raidName: r, difficulty: d }) => ({ raidName: r, difficulty: d }));
       commitClears(applyClearChange(clearsRef.current, characterName, mine));
+    } catch {
+      /* 재조회도 실패하면 안내 문구만 남긴다 */
+    }
+  }
+
+  async function changeProficiency(friendId: string, characterName: string, raidName: string, level: Proficiency | null) {
+    if (!password) return;
+    const cell = `${friendId} ${proficiencyKey(characterName, raidName)}`;
+    // 먼저 화면에 반영하고(낙관적 업데이트) 저장은 칸별 순서대로.
+    setFriends((prev) => (prev ? withProficiency(prev, friendId, characterName, raidName, level) : prev));
+    setNotice(null);
+    const res = await profQueue.save(cell, { password, friendId, characterName, raidName, level });
+    if (res.ok) {
+      setVersion((v) => v + 1);
+      return;
+    }
+    if (res.superseded) return; // 더 새 값이 곧 저장된다
+    setNotice(`${characterName}의 ${raidName} 숙련도를 저장하지 못했어요: ${handle(res.error)}`);
+    try {
+      const server = await api.listFriends(password);
+      if (profQueue.isBusy(cell)) return; // 그사이 새 변경이 생겼으면 그 값을 지킨다
+      const saved = server.find((f) => f.id === friendId)?.proficiency?.[proficiencyKey(characterName, raidName)] ?? null;
+      setFriends((prev) => (prev ? withProficiency(prev, friendId, characterName, raidName, saved) : prev));
     } catch {
       /* 재조회도 실패하면 안내 문구만 남긴다 */
     }
@@ -325,7 +357,7 @@ export default function Home() {
             <section className="panel" aria-labelledby="sec-clears">
               <div className="panel__head">
                 <h2 id="sec-clears" className="panel__title">이번 주 클리어</h2>
-                <p className="panel__hint muted">이미 다녀온 레이드는 난이도를 골라 두세요. 그 캐릭터만 후보에서 빠져요.</p>
+                <p className="panel__hint muted">이미 다녀온 레이드는 난이도를 골라 두세요. 그 캐릭터만 후보에서 빠져요. 아래 칸은 숙련도(숙련·반숙·클경)예요.</p>
               </div>
               {notice && (
                 <p className="alert alert--error" role="alert">
@@ -340,6 +372,7 @@ export default function Home() {
                 onClearChange={changeClear}
                 onCombatPower={saveCombatPower}
                 onRole={saveRole}
+                onProficiency={changeProficiency}
               />
             </section>
 

@@ -4,6 +4,8 @@ import { getRaid } from '@/core/raids';
 import { arrangeParty } from '@/lib/arrange-party';
 import { ROLE_LABEL, formatCP, formatLevel, planSummaryText } from '@/lib/view-model';
 import { TierBadge } from './TierBadge';
+import { ProficiencyBadge, ProficiencySummaryLine } from './ProficiencyBadge';
+import { DEFAULT_PROFICIENCY, partyProficiency } from '@/core/proficiency';
 
 function MemberRow({ s, names }: { s: Slot; names: Map<string, string> }) {
   return s.kind === 'friend' ? (
@@ -11,7 +13,10 @@ function MemberRow({ s, names }: { s: Slot; names: Map<string, string> }) {
       <span className={`role role--${s.character.role}`}>{ROLE_LABEL[s.character.role]}</span>
       <span className="member__who">
         <span className="member__friend">{names.get(s.friendId) ?? '알 수 없음'}</span>
-        <span className="member__char">{s.character.name}</span>
+        <span className="member__line">
+          <span className="member__char">{s.character.name}</span>
+          <ProficiencyBadge level={s.proficiency ?? DEFAULT_PROFICIENCY} />
+        </span>
       </span>
       <span className="member__stats">
         <span className="num muted">{formatLevel(s.character.itemLevel)}</span>
@@ -38,6 +43,7 @@ function PartyBlock({ party, index, rank, names, size }: { party: Party; index: 
           <span className="party__avg-value num">{formatCP(party.dealerAvgCP)}</span>
         </span>
         <TierBadge tier={party.tier} />
+        <ProficiencySummaryLine summary={partyProficiency(party)} />
       </header>
       <div className="members__cols">
         <span className="members__col members__col--level">레벨</span>

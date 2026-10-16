@@ -38,6 +38,17 @@ describe('api-client', () => {
     expect(fetch.mock.calls[1][0]).toBe('/api/friends/a%2Fb/refresh');
   });
 
+  it('PUTs proficiency with characterName, raidName, level (null = 기본값)', async () => {
+    const fetch = mockFetch(json({}));
+    await api.setProficiency('pw', 'a/b', '가나', '세르카', '숙련');
+    await api.setProficiency('pw', 'a/b', '가나', '세르카', null);
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/friends/a%2Fb/proficiency');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body as string)).toEqual({ characterName: '가나', raidName: '세르카', level: '숙련' });
+    expect(JSON.parse((fetch.mock.calls[1][1] as RequestInit).body as string)).toEqual({ characterName: '가나', raidName: '세르카', level: null });
+  });
+
   it('throws ApiError carrying the Korean server message and status', async () => {
     mockFetch(json({ error: '비밀번호가 올바르지 않아요' }, 401));
     const err = await api.listFriends('x').catch((e) => e);

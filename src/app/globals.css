@@ -35,6 +35,14 @@
   --error: #ff8a80;
   --error-bg: rgba(255, 138, 128, 0.1);
 
+  /* 숙련도: 항상 모양 아이콘(● ◐ ○)과 글자를 함께 쓴다 */
+  --prof-expert: #e3c36f;
+  --prof-expert-bg: rgba(227, 195, 111, 0.14);
+  --prof-novice: #a9b8ff;
+  --prof-novice-bg: rgba(169, 184, 255, 0.13);
+  --warn: #f5c451;
+  --warn-bg: rgba(245, 196, 81, 0.13);
+
   --font-display: 'Nanum Myeongjo', 'Noto Serif KR', 'AppleMyungjo', serif;
   --font-body: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
 
@@ -95,6 +103,13 @@
     --dealer-bg: rgba(132, 55, 143, 0.09);
     --error: #b3261e;
     --error-bg: rgba(179, 38, 30, 0.07);
+
+    --prof-expert: #7a5608;
+    --prof-expert-bg: rgba(122, 86, 8, 0.1);
+    --prof-novice: #3a4fa8;
+    --prof-novice-bg: rgba(58, 79, 168, 0.09);
+    --warn: #8a5300;
+    --warn-bg: rgba(138, 83, 0, 0.1);
   }
 }
 
@@ -1257,4 +1272,120 @@ select {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ---------- 숙련도 ---------- */
+
+/* 클리어 표 칸: 클리어 드롭다운 아래 숙련도 선택 */
+.raid-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+.roster .select--prof {
+  min-height: 32px;
+  padding: 4px var(--s2);
+  font-size: var(--fs-xs);
+}
+
+/* 정하지 않음(기본값 반숙): 흐리게, 점선 테두리 */
+.roster .select--prof-default {
+  color: var(--text-muted);
+  border-style: dashed;
+  opacity: 0.8;
+}
+
+.roster .select--prof-expert {
+  color: var(--prof-expert);
+  border-color: var(--prof-expert);
+  background: var(--prof-expert-bg);
+  font-weight: 600;
+}
+
+.roster .select--prof-mid {
+  color: var(--text);
+  border-color: var(--line-strong);
+  font-weight: 600;
+}
+
+.roster .select--prof-novice {
+  color: var(--prof-novice);
+  border-color: var(--prof-novice);
+  background: var(--prof-novice-bg);
+  font-weight: 600;
+}
+
+/* 추천 카드: 캐릭터 이름 옆 배지 */
+.member__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--s2);
+  min-width: 0;
+}
+
+.prof {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.prof__icon {
+  font-size: 0.85em;
+  line-height: 1;
+}
+
+.prof--expert {
+  color: var(--prof-expert);
+  background: var(--prof-expert-bg);
+}
+
+.prof--mid {
+  color: var(--text-muted);
+  border-style: dotted;
+}
+
+.prof--novice {
+  color: var(--prof-novice);
+  background: var(--prof-novice-bg);
+}
+
+/* 공대 머리: 숙련도 요약 + 숙련자 없음 경고 */
+.party__prof {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.party__prof-text {
+  font-variant-numeric: tabular-nums;
+}
+
+.prof-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px var(--s2);
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  color: var(--warn);
+  background: var(--warn-bg);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.prof-warn__icon {
+  line-height: 1;
 }

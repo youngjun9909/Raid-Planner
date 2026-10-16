@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ClearRecord } from '@/core/types';
+import type { ClearRecord, Friend } from '@/core/types';
 import {
   RAID_GROUPS,
   RAID_NAMES,
@@ -8,6 +8,8 @@ import {
   formatCP,
   recordsAfterChange,
   TIER_META,
+  PROFICIENCY_META,
+  withProficiency,
 } from '@/lib/view-model';
 
 const clears: ClearRecord[] = [
@@ -84,5 +86,26 @@ describe('formatting helpers', () => {
     expect(TIER_META.risky.label).toBe('위험');
     expect(TIER_META.unknown.label).toBe('모름');
     for (const t of Object.values(TIER_META)) expect(t.icon).toBeTruthy();
+  });
+});
+
+describe('숙련도 (view-model)', () => {
+  it('PROFICIENCY_META: 모양 아이콘과 글자, 클래스 이름', () => {
+    expect(PROFICIENCY_META.숙련).toMatchObject({ icon: '●', cls: 'expert' });
+    expect(PROFICIENCY_META.반숙).toMatchObject({ icon: '◐', cls: 'mid' });
+    expect(PROFICIENCY_META.클경).toMatchObject({ icon: '○', cls: 'novice' });
+  });
+
+  it('withProficiency: 한 친구의 한 칸만 바꾸고, null이면 지우며, 다 지우면 proficiency 필드도 없앤다', () => {
+    const fs: Friend[] = [
+      { id: 'a', displayName: 'A', representativeName: 'x', characters: [], proficiency: { 'x|세르카': '숙련' } },
+      { id: 'b', displayName: 'B', representativeName: 'y', characters: [] },
+    ];
+    const set = withProficiency(fs, 'b', 'y', '세르카', '클경');
+    expect(set[1].proficiency).toEqual({ 'y|세르카': '클경' });
+    expect(set[0]).toBe(fs[0]);
+    expect(fs[1].proficiency).toBeUndefined(); // 원본은 그대로
+    const cleared = withProficiency(fs, 'a', 'x', '세르카', null);
+    expect(cleared[0]).not.toHaveProperty('proficiency');
   });
 });

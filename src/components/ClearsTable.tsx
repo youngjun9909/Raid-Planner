@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import type { Character, ClearRecord, Friend, Role } from '@/core/types';
-import { RAID_GROUPS, ROLE_LABEL, clearValue, formatLevel } from '@/lib/view-model';
+import type { Character, ClearRecord, Friend, Proficiency, Role } from '@/core/types';
+import { PROFICIENCIES, isProficiency, proficiencyKey } from '@/core/proficiency';
+import { PROFICIENCY_META, RAID_GROUPS, ROLE_LABEL, clearValue, formatLevel } from '@/lib/view-model';
 import { sortCharactersByPower } from '@/lib/character-sort';
 import { CombatPowerCell } from './CombatPowerCell';
 
@@ -48,6 +49,40 @@ function RoleToggle({ character, onSave }: { character: Character; onSave: (role
   );
 }
 
+/**
+ * 숙련도 선택 (캐릭터 × 레이드 이름). 값 ''은 정하지 않음(기본값 반숙)이고 흐리게, 정한 값은 또렷하게 보인다.
+ * 글자 앞의 모양(● ◐ ○)으로도 구분해 색에만 의존하지 않는다.
+ */
+function ProficiencySelect({
+  characterName,
+  raidName,
+  value,
+  onChange,
+}: {
+  characterName: string;
+  raidName: string;
+  value: Proficiency | undefined;
+  onChange: (level: Proficiency | null) => void;
+}) {
+  const cls = value ? ` select--prof-${PROFICIENCY_META[value].cls}` : ' select--prof-default';
+  return (
+    <select
+      className={`select select--prof${cls}`}
+      value={value ?? ''}
+      onChange={(e) => onChange(isProficiency(e.target.value) ? e.target.value : null)}
+      aria-label={`${characterName} ${raidName} 숙련도`}
+      title={value ? `숙련도: ${value}` : '숙련도: 정하지 않음 (기본값 반숙)'}
+    >
+      <option value="">{PROFICIENCY_META['반숙'].icon} 반숙 (기본)</option>
+      {PROFICIENCIES.map((p) => (
+        <option key={p} value={p}>
+          {PROFICIENCY_META[p].icon} {p}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 /** 친구 × 캐릭터 표. 레이드 이름마다 드롭다운 하나라서 한 레이드에 두 난이도가 동시에 표시될 수 없다. */
 export function ClearsTable({
   friends,
@@ -56,6 +91,7 @@ export function ClearsTable({
   onClearChange,
   onCombatPower,
   onRole,
+  onProficiency,
 }: {
   friends: Friend[];
   /** 한 친구만 보여 줄 때는 친구 이름 줄을 생략한다. */
@@ -64,6 +100,7 @@ export function ClearsTable({
   onClearChange: (characterName: string, raidName: string, difficulty: string) => void;
   onCombatPower: (friendId: string, characterName: string, cp: number | null) => Promise<string | null>;
   onRole: (friendId: string, characterName: string, role: Role | null) => Promise<string | null>;
+  onProficiency: (friendId: string, characterName: string, raidName: string, level: Proficiency | null) => void;
 }) {
   return (
     <div className="table-scroll" tabIndex={0} role="region" aria-label="이번 주 클리어 표 (가로로 밀어서 볼 수 있어요)">
@@ -120,19 +157,27 @@ export function ClearsTable({
                   const value = clearValue(clears, c.name, g.name);
                   return (
                     <td key={g.name}>
-                      <select
-                        className={`select${value ? ' select--done' : ''}`}
-                        value={value}
-                        onChange={(e) => onClearChange(c.name, g.name, e.target.value)}
-                        aria-label={`${c.name} ${g.name} 클리어`}
-                      >
-                        <option value="">안 감</option>
-                        {g.raids.map((r) => (
-                          <option key={r.id} value={r.difficulty}>
-                            {r.difficulty}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="raid-cell">
+                        <select
+                          className={`select${value ? ' select--done' : ''}`}
+                          value={value}
+                          onChange={(e) => onClearChange(c.name, g.name, e.target.value)}
+                          aria-label={`${c.name} ${g.name} 클리어`}
+                        >
+                          <option value="">안 감</option>
+                          {g.raids.map((r) => (
+                            <option key={r.id} value={r.difficulty}>
+                              {r.difficulty}
+                            </option>
+                          ))}
+                        </select>
+                        <ProficiencySelect
+                          characterName={c.name}
+                          raidName={g.name}
+                          value={f.proficiency?.[proficiencyKey(c.name, g.name)]}
+                          onChange={(level) => onProficiency(f.id, c.name, g.name, level)}
+                        />
+                      </div>
                     </td>
                   );
                 })}

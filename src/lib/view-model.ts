@@ -1,5 +1,6 @@
 import { RAIDS } from '@/core/raids';
-import type { ClearRecord, PlanSummary, RaidConfig, Role, Slot, Tier } from '@/core/types';
+import { proficiencyKey } from '@/core/proficiency';
+import type { ClearRecord, Friend, PlanSummary, Proficiency, RaidConfig, Role, Slot, Tier } from '@/core/types';
 
 /** 레이드 이름별 묶음 (설정 순서 유지). 클리어 표의 열과 레이드 선택 화면에 쓴다. */
 export interface RaidGroup { name: string; raids: RaidConfig[]; }
@@ -96,4 +97,32 @@ export function planSummaryText(s: PlanSummary): string {
   return s.externalCount === 0
     ? `${head} · 친구들만으로 구성 가능`
     : `${head} · 외부 ${s.externalCount}명 필요 (서포터 ${s.externalSupports}, 딜러 ${s.externalDealers})`;
+}
+
+/**
+ * 숙련도 표시: 색만으로 구분하지 않도록 모양 아이콘(꽉 찬 원 / 반 찬 원 / 빈 원)과 글자를 함께 쓴다.
+ * cls는 CSS 클래스 이름 (prof--expert 등).
+ */
+export const PROFICIENCY_META: Record<Proficiency, { icon: string; cls: 'expert' | 'mid' | 'novice'; hint: string }> = {
+  숙련: { icon: '●', cls: 'expert', hint: '여러 번 클리어해서 익숙해요' },
+  반숙: { icon: '◐', cls: 'mid', hint: '어느 정도 알아요 (정하지 않으면 반숙)' },
+  클경: { icon: '○', cls: 'novice', hint: '클리어 경험만 있어요' },
+};
+
+/** 한 친구의 한 칸(캐릭터 × 레이드 이름) 숙련도를 바꾼 친구 목록. null이면 지워 기본값(반숙)으로. 원본은 그대로. */
+export function withProficiency(
+  friends: Friend[],
+  friendId: string,
+  characterName: string,
+  raidName: string,
+  level: Proficiency | null,
+): Friend[] {
+  const key = proficiencyKey(characterName, raidName);
+  return friends.map((f) => {
+    if (f.id !== friendId) return f;
+    const { proficiency: prev, ...rest } = f;
+    const next: Record<string, Proficiency> = { ...(prev ?? {}) };
+    if (level === null) delete next[key]; else next[key] = level;
+    return Object.keys(next).length ? { ...rest, proficiency: next } : rest;
+  });
 }

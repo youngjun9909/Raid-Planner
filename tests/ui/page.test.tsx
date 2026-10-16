@@ -20,6 +20,7 @@ let calls: Call[];
 let clears: ClearRecord[];
 let planResult: PlanResult;
 let putResponder: ((body: { characterName: string; records: unknown[] }) => Promise<Response>) | null;
+let profResponder: ((body: { characterName: string; raidName: string; level: string | null }) => Promise<Response>) | null;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -29,6 +30,7 @@ beforeEach(() => {
   clears = [];
   planResult = { candidates: [], excluded: [] };
   putResponder = null;
+  profResponder = null;
   localStorage.setItem(PASSWORD_KEY, 'pw');
   vi.stubGlobal(
     'fetch',
@@ -51,6 +53,7 @@ beforeEach(() => {
         return json(f);
       }
       if (url.startsWith('/api/friends/') && method === 'DELETE') return json({ ok: true });
+      if (url.endsWith('/proficiency')) return profResponder ? profResponder(body) : json(FRIENDS[0]);
       if (url.endsWith('/role')) {
         const f = structuredClone(FRIENDS[0]);
         const c = f.characters.find((x) => x.name === body.characterName)!;
@@ -364,6 +367,121 @@ describe('웹 화면', () => {
       expect(await screen.findByText(/저장하지 못했어요: 저장 실패/)).toBeInTheDocument();
       await waitFor(() => expect(clearGets()).toHaveLength(2));
       await waitFor(() => expect(select('세르카').value).toBe(''));
+    });
+  });
+
+  describe('숙련도 선택 (캐릭터 × 레이드 이름)', () => {
+    const RAID_NAMES = ['카제로스 3막 (모르둠)', '카제로스 4막 (아르모체)', '지평의 성당', '카제로스 종막 (카제로스)', '세르카', '벨가르딘'];
+    const prof = (name: string, raid: string) => screen.getByRole('combobox', { name: `${name} ${raid} 숙련도` }) as HTMLSelectElement;
+    const profPuts = () => calls.filter((c) => c.url.endsWith('/proficiency')).map((c) => ({ url: c.url, method: c.method, body: c.body }));
+    const friendGets = () => calls.filter((c) => c.url === '/api/friends' && c.method === 'GET');
+    beforeEach(() => { FRIENDS[0].proficiency = { '가나|세르카': '숙련' }; });
+    afterEach(() => { delete FRIENDS[0].proficiency; });
+
+    it('칸마다 숙련도 선택이 있고, 정하지 않은 칸은 "반숙 (기본)"으로 흐리게, 정한 칸은 또렷하게 보인다', async () => {
+      await renderLoaded();
+      for (const name of ['가나', '가나서폿', '다라']) for (const raid of RAID_NAMES) expect(prof(name, raid)).toBeInTheDocument();
+      const set = prof('가나', '세르카');
+      expect(set.value).toBe('숙련');
+      expect(set).not.toHaveClass('select--prof-default');
+      expect(set).toHaveClass('select--prof-expert');
+      const unset = prof('가나', '벨가르딘');
+      expect(unset.value).toBe('');
+      expect(unset).toHaveClass('select--prof-default');
+      expect(within(unset).getAllByRole('option').map((o) => o.textContent)).toEqual(['◐ 반숙 (기본)', '● 숙련', '◐ 반숙', '○ 클경']);
+      expect((within(unset).getByRole('option', { selected: true }) as HTMLOptionElement).textContent).toBe('◐ 반숙 (기본)');
+      // 클리어 드롭다운은 그대로 같은 칸에 있다
+      expect(set.closest('td')).toContainElement(screen.getByRole('combobox', { name: '가나 세르카 클리어' }));
+    });
+
+    it('바꾸면 PUT /api/friends/<id>/proficiency (레이드 이름 기준), 기본으로 돌리면 level null', async () => {
+      await renderLoaded();
+      fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '클경' } });
+      await waitFor(() => expect(profPuts()).toHaveLength(1));
+      expect(profPuts()[0]).toEqual({ url: '/api/friends/f1/proficiency', method: 'PUT', body: { characterName: '가나', raidName: '벨가르딘', level: '클경' } });
+      expect(prof('가나', '벨가르딘').value).toBe('클경');
+      fireEvent.change(prof('가나', '세르카'), { target: { value: '' } });
+      await waitFor(() => expect(profPuts()).toHaveLength(2));
+      expect(profPuts()[1].body).toEqual({ characterName: '가나', raidName: '세르카', level: null });
+      await waitFor(() => expect(prof('가나', '세르카')).toHaveClass('select--prof-default'));
+    });
+
+    it('저장 뒤 공대 후보를 다시 불러온다', async () => {
+      await renderLoaded();
+      fireEvent.click(screen.getByRole('checkbox', { name: '세르카 노말' }));
+      await waitFor(() => expect(planCalls().length).toBeGreaterThan(0));
+      const before = planCalls().length;
+      fireEvent.change(prof('다라', '세르카'), { target: { value: '숙련' } });
+      await waitFor(() => expect(profPuts()).toHaveLength(1));
+      await waitFor(() => expect(planCalls().length).toBeGreaterThan(before));
+    });
+
+    describe('저장 순서', () => {
+      type Gate = { body: { characterName: string; raidName: string; level: string | null }; ok: () => void; fail: () => void };
+      let gates: Gate[];
+      let server: Record<string, string | null>;
+      beforeEach(() => {
+        gates = [];
+        server = {};
+        profResponder = (body) => new Promise<Response>((resolve) => {
+          gates.push({
+            body,
+            ok: () => { server[`${body.characterName}|${body.raidName}`] = body.level; resolve(json(FRIENDS[0])); },
+            fail: () => resolve(json({ error: '저장 실패' }, 500)),
+          });
+        });
+      });
+
+      it('같은 칸을 빠르게 여러 번 바꾸면 하나씩 순서대로 보내고, 마지막 값으로 끝난다', async () => {
+        await renderLoaded();
+        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '클경' } });
+        await waitFor(() => expect(gates).toHaveLength(1));
+        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '숙련' } });
+        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '반숙' } });
+        await new Promise((r) => setTimeout(r, 20));
+        expect(gates).toHaveLength(1); // 앞 요청이 끝나기 전에는 보내지 않는다
+        expect(prof('가나', '벨가르딘').value).toBe('반숙');
+        gates[0].ok();
+        await waitFor(() => expect(gates).toHaveLength(2));
+        expect(gates[1].body.level).toBe('반숙'); // 대기 중이던 변경은 최신 값 하나로
+        gates[1].ok();
+        await waitFor(() => expect(server['가나|벨가르딘']).toBe('반숙'));
+        expect(gates.map((g) => g.body.level)).toEqual(['클경', '반숙']);
+        expect(prof('가나', '벨가르딘').value).toBe('반숙');
+      });
+
+      it('다른 칸은 서로 기다리지 않는다', async () => {
+        await renderLoaded();
+        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '클경' } });
+        fireEvent.change(prof('가나', '지평의 성당'), { target: { value: '숙련' } });
+        await waitFor(() => expect(gates).toHaveLength(2));
+      });
+
+      it('첫 저장이 실패해도 대기 중인 새 값은 되돌리지 않는다', async () => {
+        await renderLoaded();
+        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '클경' } });
+        await waitFor(() => expect(gates).toHaveLength(1));
+        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '숙련' } });
+        gates[0].fail();
+        await waitFor(() => expect(gates).toHaveLength(2));
+        gates[1].ok();
+        await waitFor(() => expect(server['가나|벨가르딘']).toBe('숙련'));
+        await new Promise((r) => setTimeout(r, 20));
+        expect(prof('가나', '벨가르딘').value).toBe('숙련');
+        expect(screen.queryByText(/숙련도를 저장하지 못했어요/)).not.toBeInTheDocument();
+      });
+
+      it('실패하면 서버 값으로 되돌리고 안내한다', async () => {
+        await renderLoaded();
+        expect(friendGets()).toHaveLength(1);
+        fireEvent.change(prof('가나', '세르카'), { target: { value: '클경' } });
+        await waitFor(() => expect(gates).toHaveLength(1));
+        expect(prof('가나', '세르카').value).toBe('클경'); // 먼저 화면에 반영
+        gates[0].fail();
+        expect(await screen.findByText('가나의 세르카 숙련도를 저장하지 못했어요: 저장 실패')).toBeInTheDocument();
+        await waitFor(() => expect(friendGets()).toHaveLength(2));
+        await waitFor(() => expect(prof('가나', '세르카').value).toBe('숙련'));
+      });
     });
   });
 
