@@ -4,6 +4,7 @@ import { GET as getFriends, POST as postFriend } from '@/app/api/friends/route';
 import { POST as refresh } from '@/app/api/friends/[id]/refresh/route';
 import { PUT as putCp } from '@/app/api/friends/[id]/combat-power/route';
 import { PUT as putRole } from '@/app/api/friends/[id]/role/route';
+import { PUT as putProf } from '@/app/api/friends/[id]/proficiency/route';
 import { DELETE as deleteFriend } from '@/app/api/friends/[id]/route';
 import { weekKey } from '@/core/week';
 import { LostArkError } from '@/lostark/client';
@@ -155,5 +156,46 @@ describe('PUT /api/friends/[id]/combat-power', () => {
     expect((await put('a', { characterName: 'A1', cp: 'x' })).status).toBe(400);
     expect((await put('a', { characterName: 'A1' })).status).toBe(400);
     expect((await put('a', { characterName: 'Nope', cp: 1 })).status).toBe(400);
+  });
+});
+
+describe('PUT /api/friends/[id]/proficiency', () => {
+  const put = (id: string, body: unknown, password?: string | null) =>
+    putProf(req(`/api/friends/${id}/proficiency`, 'PUT', body, password), params(id));
+  beforeEach(async () => { await store.saveFriend(friend('a', [ch('A1'), ch('A2')])); });
+
+  it('숙련도를 저장하고(친구 응답의 proficiency) GET /api/friends에도 실린다, null이면 기본값으로', async () => {
+    const res = await put('a', { characterName: 'A1', raidName: '세르카', level: '숙련' });
+    expect(res.status).toBe(200);
+    expect((await res.json()).proficiency).toEqual({ 'A1|세르카': '숙련' });
+    expect((await put('a', { characterName: 'A2', raidName: '벨가르딘', level: '클경' })).status).toBe(200);
+    const list = await (await getFriends(req('/api/friends'))).json();
+    expect(list[0].proficiency).toEqual({ 'A1|세르카': '숙련', 'A2|벨가르딘': '클경' });
+    const cleared = await put('a', { characterName: 'A1', raidName: '세르카', level: null });
+    expect(cleared.status).toBe(200);
+    expect((await cleared.json()).proficiency).toEqual({ 'A2|벨가르딘': '클경' });
+  });
+
+  it('반숙도 직접 정할 수 있다', async () => {
+    const res = await put('a', { characterName: 'A1', raidName: '지평의 성당', level: '반숙' });
+    expect((await res.json()).proficiency).toEqual({ 'A1|지평의 성당': '반숙' });
+  });
+
+  it('검증 오류: 없는 친구 404, 레이드/숙련도/캐릭터 400, 비밀번호 401', async () => {
+    expect((await put('zz', { characterName: 'A1', raidName: '세르카', level: '숙련' })).status).toBe(404);
+    const bad = await put('a', { characterName: 'A1', raidName: '없는 레이드', level: '숙련' });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: '알 수 없는 레이드예요' });
+    expect((await put('a', { characterName: 'A1', raidName: 'serka-hard', level: '숙련' })).status).toBe(400); // id가 아니라 이름
+    expect((await put('a', { characterName: 'A1', level: '숙련' })).status).toBe(400);
+    expect((await put('a', { characterName: 'A1', raidName: '세르카', level: '고수' })).status).toBe(400);
+    expect((await put('a', { characterName: 'A1', raidName: '세르카' })).status).toBe(400);
+    expect((await put('a', { raidName: '세르카', level: '숙련' })).status).toBe(400);
+    const notMine = await put('a', { characterName: 'Nope', raidName: '세르카', level: '숙련' });
+    expect(notMine.status).toBe(400);
+    expect(await notMine.json()).toEqual({ error: '이 친구의 캐릭터가 아니에요' });
+    expect((await put('a', { characterName: 'A1', raidName: '세르카', level: '숙련' }, 'bad')).status).toBe(401);
+    expect((await put('a', { characterName: 'A1', raidName: '세르카', level: '숙련' }, null)).status).toBe(401);
+    expect((await store.getFriend('a'))!.proficiency).toBeUndefined();
   });
 });

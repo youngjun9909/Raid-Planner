@@ -5,12 +5,26 @@ export interface Character {
   manualCombatPower?: boolean;
   manualRole?: boolean;
 }
-export interface Friend { id: string; displayName: string; discordUserId?: string; representativeName: string; characters: Character[]; }
+/** 숙련도 (캐릭터 × 레이드 이름). 숙련 > 반숙 > 클경. 정하지 않으면 반숙. */
+export type Proficiency = '숙련' | '반숙' | '클경';
+export interface Friend {
+  id: string; displayName: string; discordUserId?: string; representativeName: string; characters: Character[];
+  /**
+   * 저장소가 읽을 때만 붙이는 숙련도: 키 `<캐릭터 이름>|<레이드 이름>` → 숙련도. 정한 값이 없으면 생략된다
+   * (빠진 칸은 기본값 반숙). saveFriend는 이 필드를 저장하지 않는다 (setProficiency로만 바뀐다).
+   */
+  proficiency?: Record<string, Proficiency>;
+}
 export interface RaidConfig { id: string; name: string; difficulty: string; size: 4 | 8; minLevel: number; recommendedCP: { min: number; max: number | null }; }
 export interface ClearRecord { characterName: string; raidName: string; difficulty: string; }
 export type Tier = 'comfortable' | 'tight' | 'risky' | 'unknown';
-export type Slot = { kind: 'friend'; friendId: string; character: Character } | { kind: 'external'; role: Role };
-export interface Party { slots: Slot[]; dealerAvgCP: number | null; tier: Tier; }
+/** 친구 자리의 proficiency는 이 레이드에서의 숙련도 (편성 계산이 채운다; 없으면 반숙으로 본다). */
+export type Slot =
+  | { kind: 'friend'; friendId: string; character: Character; proficiency?: Proficiency }
+  | { kind: 'external'; role: Role };
+/** 공대 하나의 숙련도 요약 (친구 자리만 센다; 외부 자리는 알 수 없어 빠진다). noExpert = 숙련 친구 캐릭터가 없음. */
+export interface ProficiencySummary { 숙련: number; 반숙: number; 클경: number; noExpert: boolean; }
+export interface Party { slots: Slot[]; dealerAvgCP: number | null; tier: Tier; proficiency?: ProficiencySummary; }
 /** 추천 하나의 한 줄 요약 (웹/디스코드가 같이 쓴다). 외부인은 공대마다 모자란 자리 수의 합. */
 export interface PlanSummary {
   friendCount: number; characterCount: number; partyCount: number;

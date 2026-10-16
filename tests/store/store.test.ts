@@ -174,6 +174,44 @@ describe.each([
     expect(await s.deleteFriend('nope', 'w1')).toBe(false);
   });
 
+  it('setProficiency: 저장한 숙련도가 friend.proficiency에 붙고(키 "캐릭터|레이드"), null이면 기본값(생략)으로 돌아간다', async () => {
+    await s.saveFriend(friend());
+    expect((await s.getFriend('f1'))!.proficiency).toBeUndefined();
+    await s.setProficiency('f1', 'Alpha', '세르카', '숙련');
+    await s.setProficiency('f1', 'Beta', '세르카', '클경');
+    await s.setProficiency('f1', 'Alpha', '벨가르딘', '반숙');
+    expect((await s.getFriend('f1'))!.proficiency).toEqual({ 'Alpha|세르카': '숙련', 'Beta|세르카': '클경', 'Alpha|벨가르딘': '반숙' });
+    expect((await s.listFriends())[0].proficiency).toEqual({ 'Alpha|세르카': '숙련', 'Beta|세르카': '클경', 'Alpha|벨가르딘': '반숙' });
+    await s.setProficiency('f1', 'Alpha', '세르카', '클경');
+    expect((await s.getFriend('f1'))!.proficiency!['Alpha|세르카']).toBe('클경');
+    await s.setProficiency('f1', 'Alpha', '세르카', null);
+    await s.setProficiency('f1', 'Beta', '세르카', null);
+    await s.setProficiency('f1', 'Alpha', '벨가르딘', null);
+    expect((await s.getFriend('f1'))!.proficiency).toBeUndefined();
+    expect(await s.getFriend('f1')).toEqual(friend());
+  });
+
+  it('숙련도는 로스터를 새로 저장해도(주간 갱신) 남고, saveFriend에 실린 proficiency는 저장하지 않는다', async () => {
+    await s.saveFriend(friend());
+    await s.setProficiency('f1', 'Alpha', '세르카', '숙련');
+    await s.saveFriend({ ...friend({ displayName: 'B' }), proficiency: { 'Beta|세르카': '클경' } });
+    const f = (await s.getFriend('f1'))!;
+    expect(f.displayName).toBe('B');
+    expect(f.proficiency).toEqual({ 'Alpha|세르카': '숙련' });
+  });
+
+  it('숙련도는 친구마다 따로이고, deleteFriend가 지운다 (같은 id로 다시 저장해도 되살아나지 않는다)', async () => {
+    await s.saveFriend(friend());
+    await s.saveFriend(friend({ id: 'f2', representativeName: 'Gamma', characters: [{ name: 'Gamma', className: 'Bard', role: 'support', itemLevel: 1700, combatPower: 1 }] }));
+    await s.setProficiency('f1', 'Alpha', '세르카', '숙련');
+    await s.setProficiency('f2', 'Gamma', '세르카', '클경');
+    expect((await s.getFriend('f2'))!.proficiency).toEqual({ 'Gamma|세르카': '클경' });
+    expect(await s.deleteFriend('f1', 'w1')).toBe(true);
+    await s.saveFriend(friend());
+    expect((await s.getFriend('f1'))!.proficiency).toBeUndefined();
+    expect((await s.getFriend('f2'))!.proficiency).toEqual({ 'Gamma|세르카': '클경' });
+  });
+
   it('deleteWeek 후 getClears는 []', async () => {
     await s.setCharacterClears('w1', 'Alpha', [{ raidName: 'R1', difficulty: 'n' }]);
     await s.deleteWeek('w1');
