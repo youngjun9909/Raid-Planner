@@ -1,4 +1,4 @@
-import { checkPassword } from '@/lib/auth';
+import { passwordStatus } from '@/lib/auth';
 import { LostArkError } from '@/lostark/client';
 import { StoreConfigError } from '@/store/store';
 
@@ -21,9 +21,13 @@ export function withConfigErrors<A extends unknown[]>(fn: (...args: A) => Promis
 
 export const unauthorized = () => errorResponse('비밀번호가 올바르지 않아요', 401);
 
-/** Returns a 401 Response when the password is wrong, otherwise null. */
+export const passwordUnconfigured = () => errorResponse('APP_PASSWORD를 설정해 주세요', 503);
+
+/** 비밀번호가 틀리면 401, 배포 환경인데 APP_PASSWORD가 없으면 503, 통과하면 null. */
 export function guard(req: Request): Response | null {
-  return checkPassword(req) ? null : unauthorized();
+  const status = passwordStatus(req);
+  if (status === 'ok') return null;
+  return status === 'unconfigured' ? passwordUnconfigured() : unauthorized();
 }
 
 export async function readJson(req: Request): Promise<Record<string, unknown> | null> {
