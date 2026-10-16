@@ -180,7 +180,19 @@ export function planRaid(input: {
     return excluded.length ? { candidates: [], excluded, reason: NO_ELIGIBLE_REASON } : { candidates: [], excluded };
   }
 
-  const partyCount = Math.ceil(pool.length / raid.size);
+  // 최소 공대 수에서 유효한 후보가 하나도 없으면(예: 딜러만 4명인 4인 레이드) 공대를 하나 늘려 다시 찾는다.
+  // 그러면 공대마다 외부 서포터 자리가 생긴다. 최소 공대 수에서 후보가 있으면 결과는 예전과 같다.
+  const minParties = Math.ceil(pool.length / raid.size);
+  let candidates = searchCandidates(pool, minParties, raid, limit);
+  if (candidates.length === 0 && minParties + 1 <= pool.length) {
+    candidates = searchCandidates(pool, minParties + 1, raid, limit);
+  }
+  // 그래도 후보가 없으면: 모든 분배에서 서포터 자리를 둘 곳이 없다 (예: 서포터만 4명인 4인 레이드).
+  return candidates.length ? { candidates, excluded } : { candidates, excluded, reason: NO_SUPPORT_ROOM_REASON };
+}
+
+/** pool을 정확히 partyCount개 공대로 나누는 후보들 중 상위 limit개. 유효한 구성이 없으면 []. */
+function searchCandidates(pool: PoolMember[], partyCount: number, raid: RaidConfig, limit: number): Candidate[] {
   const groupings = partitions(pool, partyCount, raid.size);
   const topK = Math.max(2, Math.floor(Math.pow(COMBINATION_BUDGET / groupings.length, 1 / partyCount)));
   const byOption = partyOptionCompare(raid);
@@ -216,7 +228,5 @@ export function planRaid(input: {
       if (!prev || compareCandidates(candidate, prev) < 0) best.set(key, candidate);
     }
   }
-  const candidates = selectTop([...best.values()], limit);
-  // 남은 친구가 있는데 후보가 없으면: 모든 분배에서 서포터 자리를 둘 곳이 없다 (예: 딜러만 4명인 4인 레이드).
-  return candidates.length ? { candidates, excluded } : { candidates, excluded, reason: NO_SUPPORT_ROOM_REASON };
+  return selectTop([...best.values()], limit);
 }

@@ -235,14 +235,40 @@ describe('planRaid', () => {
     expect(ms).toBeLessThan(2000);
   });
 
-  it('딜러만 4명이 4인 레이드: 후보가 없고 서포터 부족 사유를 알려 준다 [Fix 4]', () => {
+  it('딜러만 4명이 4인 레이드: 공대를 하나 늘려 공대마다 외부 서포터를 넣은 후보를 낸다', () => {
     const dealers = makeFriends({
       w: [['w1', 'dealer', 1740, 3600]], x: [['x1', 'dealer', 1740, 3600]],
       y: [['y1', 'dealer', 1740, 3600]], z: [['z1', 'dealer', 1740, 3600]],
     });
     const r = planRaid({ raid: serkaHard, friends: dealers, clears: [], attendeeIds: ['w', 'x', 'y', 'z'] });
+    expect(r.reason).toBeUndefined();
+    expect(r.candidates.length).toBeGreaterThan(0);
+    expect(new Set(r.candidates.map((c) => c.label))).toEqual(new Set(['2+2', '3+1']));
+    for (const c of r.candidates) {
+      expect(c.parties).toHaveLength(2);
+      for (const p of c.parties) {
+        expect(p.slots).toHaveLength(4);
+        expect(p.slots.filter((sl) => sl.kind === 'external' && sl.role === 'support')).toHaveLength(1);
+      }
+      expect(c.externalCount).toBe(4);
+      const placed = c.parties.flatMap((p) => p.slots.flatMap((sl) => (sl.kind === 'friend' ? [sl.friendId] : [])));
+      expect(placed.sort()).toEqual(['w', 'x', 'y', 'z']);
+    }
+  });
+
+  it('공대 수를 하나 늘려도 안 되면 서포터 부족 사유를 알려 준다 [Fix 4]', () => {
+    const supports = makeFriends({
+      w: [['w1', 'support', 1740, 2000]], x: [['x1', 'support', 1740, 2000]],
+      y: [['y1', 'support', 1740, 2000]], z: [['z1', 'support', 1740, 2000]],
+    });
+    const r = planRaid({ raid: serkaHard, friends: supports, clears: [], attendeeIds: ['w', 'x', 'y', 'z'] });
     expect(r.candidates).toEqual([]);
     expect(r.reason).toBe('서포터 자리를 채울 수 없어요. 서포터가 필요해요 (외부 서포터를 구해야 해요).');
+  });
+
+  it('최소 공대 수에서 후보가 있으면 공대 수를 늘리지 않는다', () => {
+    const r = planRaid({ raid: serkaHard, friends, clears, attendeeIds: ALL });
+    expect(r.candidates.every((c) => c.parties.length === 2)).toBe(true);
   });
 
   it('참석자 모두 가능한 캐릭터가 없으면 그 사유를 알려 준다 [Fix 4]', () => {
