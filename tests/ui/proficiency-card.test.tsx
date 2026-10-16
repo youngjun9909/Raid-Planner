@@ -29,7 +29,7 @@ describe('추천 카드의 숙련도', () => {
   const p2 = party([fs('딜3', 'dealer', 2300, '반숙'), fs('딜4', 'dealer', 2200, '클경', 'f2'), ext('dealer'), ext('support')]);
 
   it('구성원 줄마다 숙련도 배지(모양 아이콘 + 글자), 외부 자리에는 없다', () => {
-    render(<CandidateCard candidate={cand([p1, p2])} rank={0} friends={friends} raidId="serka-hard" />);
+    render(<CandidateCard candidate={cand([p1, p2])} rank={0} friends={friends} raidId="serka-hard" proficiencyTracked />);
     const r1 = screen.getByRole('region', { name: '추천 1 1공대' });
     const row = (name: string) => within(r1).getByText(name).closest('li')!;
     expect(within(row('딜1')).getByText('숙련')).toHaveClass('prof__label');
@@ -43,7 +43,7 @@ describe('추천 카드의 숙련도', () => {
   });
 
   it('공대 머리에 "숙련 1 · 반숙 1 · 클경 1" 요약, 숙련자가 없는 공대에만 "숙련자 없음" 경고', () => {
-    render(<CandidateCard candidate={cand([p1, p2])} rank={0} friends={friends} raidId="serka-hard" />);
+    render(<CandidateCard candidate={cand([p1, p2])} rank={0} friends={friends} raidId="serka-hard" proficiencyTracked />);
     const r1 = screen.getByRole('region', { name: '추천 1 1공대' });
     const r2 = screen.getByRole('region', { name: '추천 1 2공대' });
     expect(within(r1).getByText('숙련 1 · 반숙 1 · 클경 1')).toBeInTheDocument();
@@ -54,12 +54,31 @@ describe('추천 카드의 숙련도', () => {
     expect(warn.querySelector('[aria-hidden="true"]')).toHaveTextContent('⚠');
   });
 
-  it('예전 응답(숙련도 없음)도 반숙으로 보고 요약을 슬롯에서 계산한다', () => {
-    render(<CandidateCard candidate={cand([party([fs('딜1', 'dealer', 2500), ext('support')], false)])} rank={0} friends={friends} raidId="serka-hard" />);
+  it('숙련도를 아무도 정하지 않았으면(추적 안 함) 요약은 보이지만 경고와 기본 반숙 배지는 없다 (예전 응답도 같음)', () => {
+    const plain = party([fs('딜1', 'dealer', 2500), fs('딜2', 'dealer', 2400, '반숙', 'f2'), ext('support')]);
+    for (const cardParty of [plain, party([fs('딜1', 'dealer', 2500), ext('support')], false)]) {
+      const { unmount } = render(<CandidateCard candidate={cand([cardParty])} rank={0} friends={friends} raidId="serka-hard" />);
+      const r = screen.getByRole('region', { name: '추천 1 1공대' });
+      expect(within(r).getByText(/^숙련 0 · 반숙 \d · 클경 0$/)).toBeInTheDocument();
+      expect(within(r).queryByText('숙련자 없음')).toBeNull();
+      expect(r.querySelector('.prof')).toBeNull();
+      unmount();
+    }
+  });
+
+  it('추적 중이 아니어도 숙련/클경 값은 배지를 보여 준다 (기본 반숙만 숨김)', () => {
+    render(<CandidateCard candidate={cand([party([fs('딜1', 'dealer', 2500, '숙련'), fs('딜2', 'dealer', 2400, '클경', 'f2'), fs('딜3', 'dealer', 2400, '반숙')])])} rank={0} friends={friends} raidId="serka-hard" />);
     const r = screen.getByRole('region', { name: '추천 1 1공대' });
-    expect(within(r).getByText('숙련 0 · 반숙 1 · 클경 0')).toBeInTheDocument();
+    expect(r.querySelectorAll('.prof--expert')).toHaveLength(1);
+    expect(r.querySelectorAll('.prof--novice')).toHaveLength(1);
+    expect(r.querySelectorAll('.prof--mid')).toHaveLength(0);
+  });
+
+  it('추적 중이면 모두 클경인 공대에도 "숙련자 없음" 경고', () => {
+    render(<CandidateCard candidate={cand([party([fs('딜1', 'dealer', 2500, '클경'), fs('딜2', 'dealer', 2400, '클경', 'f2')])])} rank={0} friends={friends} raidId="serka-hard" proficiencyTracked />);
+    const r = screen.getByRole('region', { name: '추천 1 1공대' });
     expect(within(r).getByText('숙련자 없음')).toBeInTheDocument();
-    expect(within(r).getByText('딜1').closest('li')!.querySelector('.prof--mid')).not.toBeNull();
+    expect(within(r).getByText('숙련 0 · 반숙 0 · 클경 2')).toBeInTheDocument();
   });
 
   it('배지를 넣어도 표시 순서(딜러 → 서포터)와 3열 그리드 구조는 그대로', () => {

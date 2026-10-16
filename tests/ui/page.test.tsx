@@ -203,6 +203,21 @@ describe('웹 화면', () => {
     expect(document.body.textContent).not.toMatch(/분배/);
   });
 
+  it('"숙련자 없음" 경고는 계획 응답의 proficiencyTracked가 true일 때만 보인다', async () => {
+    planResult = { candidates: [friendsOnly], excluded: [] };
+    await renderLoaded();
+    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 노말' }));
+    const card = await screen.findByRole('article', { name: /추천 1/ });
+    expect(within(card).getByText('숙련 0 · 반숙 2 · 클경 0')).toBeInTheDocument();
+    expect(within(card).queryByText('숙련자 없음')).toBeNull();
+    cleanup();
+    planResult = { candidates: [friendsOnly], excluded: [], proficiencyTracked: true };
+    await renderLoaded();
+    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 노말' }));
+    const tracked = await screen.findByRole('article', { name: /추천 1/ });
+    expect(within(tracked).getByText('숙련자 없음')).toBeInTheDocument();
+  });
+
   it('excluded가 있으면 "가능한 캐릭터 없음" 안내가 보인다', async () => {
     planResult = {
       candidates: [],

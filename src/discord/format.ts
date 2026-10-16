@@ -5,7 +5,7 @@
 import { RAIDS } from '@/core/raids';
 import { weekKey } from '@/core/week';
 import type { Candidate, Character, ClearRecord, Friend, Party, PlanResult, Proficiency, RaidConfig, Slot, Tier } from '@/core/types';
-import { DEFAULT_PROFICIENCY, NO_EXPERT_TEXT, partyProficiency, proficiencySummaryText } from '@/core/proficiency';
+import { DEFAULT_PROFICIENCY, NO_EXPERT_TEXT, partyProficiency, proficiencySummaryText, showProficiencyBadge } from '@/core/proficiency';
 import { countExternals, formatCP, formatLevel, formatRange, planSummaryText } from '@/lib/view-model';
 import { arrangeParty } from '@/lib/arrange-party';
 import { COMMAND_GROUPS, raidTitle, type CommandDef } from './commands';
@@ -157,19 +157,25 @@ export function gauge(avg: number | null, recommendedMin: number): string {
  */
 type Detail = 0 | 1 | 2;
 
-function memberLine(slot: Slot, names: Map<string, string>, detail: Detail = 0): string {
+/** tracked: 이 편성에서 숙련도를 직접 정한 캐릭터가 있는가. 아니면 기본(반숙) 배지와 숙련도 요약·경고를 뺀다. */
+function memberLine(slot: Slot, names: Map<string, string>, detail: Detail, tracked: boolean): string {
   if (slot.kind === 'external') return `${ICON.external} 외부 ${slot.role === 'support' ? '서포터' : '딜러'} 구하기`;
   const c = slot.character;
   const owner = names.get(slot.friendId) ?? '?';
   const level = detail < 2 ? ` · ${formatLevel(c.itemLevel)}` : '';
-  const prof = PROFICIENCY_TEXT[slot.proficiency ?? DEFAULT_PROFICIENCY];
+  const lv = slot.proficiency ?? DEFAULT_PROFICIENCY;
+  const prof = showProficiencyBadge(lv, tracked) ? ` ${PROFICIENCY_TEXT[lv]}` : '';
   return c.role === 'support'
-    ? `${ICON.support} **${c.name}** ${prof}${level} · ${owner}`
-    : `${ICON.dealer} **${c.name}** ${prof}${level} · CP ${formatCP(c.combatPower)} · ${owner}`;
+    ? `${ICON.support} **${c.name}**${prof}${level} · ${owner}`
+    : `${ICON.dealer} **${c.name}**${prof}${level} · CP ${formatCP(c.combatPower)} · ${owner}`;
 }
 
-/** 공대 칸 제목 뒤에 붙는 숙련도: " · 숙련 1 · 반숙 1 · 클경 0" (+ " · ⚠️ 숙련자 없음"). 외부 자리는 세지 않는다. */
-function proficiencyTitle(p: Party): string {
+/**
+ * 공대 칸 제목 뒤에 붙는 숙련도: " · 숙련 1 · 반숙 1 · 클경 0" (+ " · ⚠️ 숙련자 없음"). 외부 자리는 세지 않는다.
+ * 숙련도를 추적하지 않으면(아무도 정하지 않음) 빈 문자열: 자리를 아끼고 의미 없는 경고를 띄우지 않는다.
+ */
+function proficiencyTitle(p: Party, tracked: boolean): string {
+  if (!tracked) return '';
   const s = partyProficiency(p);
   return ` · ${proficiencySummaryText(s)}${s.noExpert ? ` · ${ICON.warn} ${NO_EXPERT_TEXT}` : ''}`;
 }
@@ -178,15 +184,15 @@ function proficiencyTitle(p: Party): string {
 export const BLOCK_SEPARATOR = '┈┈┈┈┈┈┈┈';
 
 /** 구성원 줄: 4인은 딜러 3 → 서포터 1, 8인은 그 묶음 둘을 구분선으로 나눈다 (arrangeParty 순서). */
-function memberLines(p: Party, names: Map<string, string>, detail: Detail, size: number): string[] {
+function memberLines(p: Party, names: Map<string, string>, detail: Detail, size: number, tracked: boolean): string[] {
   const blocks = arrangeParty(p, size);
   const lines = blocks.map((block) => {
-    if (detail === 0) return block.map((s) => memberLine(s, names));
+    if (detail === 0) return block.map((s) => memberLine(s, names, detail, tracked));
     // 줄이는 단계: 같은 역할의 외부인 연속 자리는 한 줄로 합친다 (순서는 그대로).
     const out: string[] = [];
     for (let i = 0; i < block.length; i++) {
       const s = block[i];
-      if (s.kind === 'friend') { out.push(memberLine(s, names, detail)); continue; }
+      if (s.kind === 'friend') { out.push(memberLine(s, names, detail, tracked)); continue; }
       let n = 1;
       while (i + 1 < block.length) {
         const nx = block[i + 1];
@@ -201,11 +207,11 @@ function memberLines(p: Party, names: Map<string, string>, detail: Detail, size:
 }
 
 /** 공대 칸: 이름 "1공대 · 평균 3,900 🟢 여유 · 숙련 1 · 반숙 2 · 클경 0", 값은 게이지 + 구성원 줄. */
-function partyField(p: Party, i: number, raid: RaidConfig, names: Map<string, string>, detail: Detail = 0): EmbedField {
+function partyField(p: Party, i: number, raid: RaidConfig, names: Map<string, string>, detail: Detail, tracked: boolean): EmbedField {
   const avg = p.dealerAvgCP === null ? '정보 없음' : formatCP(p.dealerAvgCP);
-  const lines = memberLines(p, names, detail, raid.size);
+  const lines = memberLines(p, names, detail, raid.size, tracked);
   return {
-    name: `${i + 1}공대 · 평균 ${avg} ${TIER_TEXT[p.tier]}${proficiencyTitle(p)}`,
+    name: `${i + 1}공대 · 평균 ${avg} ${TIER_TEXT[p.tier]}${proficiencyTitle(p, tracked)}`,
     value: (detail < 2 ? [`\`${gauge(p.dealerAvgCP, raid.recommendedCP.min)}\``, ...lines] : lines).join('\n'),
   };
 }
@@ -238,7 +244,7 @@ export function planButtons(raid: RaidConfig): ActionRow {
   };
 }
 
-interface EmbedOpts { detail: Detail; shown?: number; }
+interface EmbedOpts { detail: Detail; shown?: number; tracked: boolean; }
 
 /** 추천 하나 = 임베드 하나: 제목 "⭐ 추천 1 · 세르카 하드", 설명 = 요약 한 줄, 공대마다 칸 하나. */
 function candidateEmbed(c: Candidate, i: number, raid: RaidConfig, names: Map<string, string>, excluded: string, now: Date, opts: EmbedOpts): Embed {
@@ -247,7 +253,7 @@ function candidateEmbed(c: Candidate, i: number, raid: RaidConfig, names: Map<st
   const fields: EmbedField[] = [];
   c.parties.slice(0, shown).forEach((p, j) => {
     if (j > 0 && spacers) fields.push(SPACER);
-    fields.push(partyField(p, j, raid, names, opts.detail));
+    fields.push(partyField(p, j, raid, names, opts.detail, opts.tracked));
   });
   const description = [
     planSummaryText(c.summary),
@@ -276,7 +282,8 @@ function fitsAsIs(e: Embed): boolean {
  * 첫 추천 하나도 안 들어가면 공대를 뒤에서부터 줄이고 설명에 그 사실을 적는다 (공대가 말없이 잘리지 않게).
  */
 function planEmbeds(result: PlanResult, raid: RaidConfig, names: Map<string, string>, excluded: string, now: Date): Embed[] {
-  const make = (c: Candidate, i: number, opts: EmbedOpts) => candidateEmbed(c, i, raid, names, excluded, now, opts);
+  const tracked = result.proficiencyTracked === true;
+  const make = (c: Candidate, i: number, opts: Omit<EmbedOpts, 'tracked'>) => candidateEmbed(c, i, raid, names, excluded, now, { ...opts, tracked });
   const total = (es: Embed[]) => es.reduce((s, e) => s + embedSize(e), 0);
   const cands = result.candidates.slice(0, LIMITS.embeds);
   for (const detail of [0, 1, 2] as Detail[]) {

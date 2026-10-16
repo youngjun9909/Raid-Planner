@@ -35,4 +35,10 @@ export interface PlanSummary {
  * (한 공대에는 한 번만), 같은 캐릭터는 추천 안에서 한 번만 나온다. imbalance = 공대별 딜러 평균의 최댓값-최솟값.
  */
 export interface Candidate { parties: Party[]; summary: PlanSummary; imbalance: number; }
-export interface PlanResult { candidates: Candidate[]; excluded: { friendId: string; reason: string }[]; reason?: string; }
+/**
+ * proficiencyTracked: 이 편성의 대상 캐릭터 중 하나라도 이 레이드 숙련도를 직접 정해 두었는가 (반숙 포함).
+ * false(또는 없음)면 모두 기본값이라 "숙련자 없음" 경고와 기본 반숙 배지를 보여 주지 않는다. 대상이 없으면 생략.
+ */
+export interface PlanResult {
+  candidates: Candidate[]; excluded: { friendId: string; reason: string }[]; reason?: string; proficiencyTracked?: boolean;
+}

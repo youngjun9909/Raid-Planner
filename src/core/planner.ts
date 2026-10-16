@@ -503,8 +503,11 @@ export function planRaid(input: {
   clears: ClearRecord[];
   attendeeIds: string[];
   limit?: number;
-  /** 이 레이드(이름)에서 캐릭터의 숙련도. 주지 않으면 모두 반숙 (숙련도가 순위에 영향 없음). */
-  proficiency?: (friendId: string, characterName: string) => Proficiency;
+  /**
+   * 이 레이드(이름)에서 직접 정한 캐릭터의 숙련도, 정하지 않았으면 undefined (반숙으로 계산).
+   * 주지 않으면 모두 반숙 (숙련도가 순위에 영향 없음). 하나라도 정해 두었으면 결과의 proficiencyTracked가 true.
+   */
+  proficiency?: (friendId: string, characterName: string) => Proficiency | undefined;
 }): PlanResult {
   const { raid, friends, clears, attendeeIds, limit = DEFAULT_PLAN_LIMIT, proficiency } = input;
   const excluded: PlanResult['excluded'] = [];
@@ -513,6 +516,7 @@ export function planRaid(input: {
   const charsPerFriend: number[] = [];
   // 방어: 두 친구에 같은 이름의 캐릭터가 있으면 먼저 나온 친구의 것만 쓴다 (한 추천에 같은 캐릭터가 두 번 놓이지 않게).
   const claimed = new Set<string>();
+  let proficiencyTracked = false;
   for (const f of friends) {
     if (!attendees.has(f.id)) continue;
     const eligible = eligibleCharacters(f, raid, clears).filter((c) => !claimed.has(c.name));
@@ -521,7 +525,9 @@ export function planRaid(input: {
     const friend = charsPerFriend.length;
     charsPerFriend.push(eligible.length);
     for (const c of eligible) {
-      const level = proficiency?.(f.id, c.name) ?? DEFAULT_PROFICIENCY;
+      const recorded = proficiency?.(f.id, c.name);
+      if (recorded !== undefined) proficiencyTracked = true;
+      const level = recorded ?? DEFAULT_PROFICIENCY;
       items.push({
         friendId: f.id, friend, character: c, support: c.role === 'support', cp: c.role === 'support' ? null : c.combatPower,
         level, dev: DEV[level],
@@ -563,7 +569,7 @@ export function planRaid(input: {
       chosen.add(f);
     }
     const picked = ranked.filter((f) => chosen.has(f));
-    return { candidates: picked.map(toCandidate), excluded };
+    return { candidates: picked.map(toCandidate), excluded, proficiencyTracked };
   }
-  return { candidates: [], excluded, reason: NO_LAYOUT_REASON };
+  return { candidates: [], excluded, reason: NO_LAYOUT_REASON, proficiencyTracked };
 }

@@ -578,6 +578,20 @@ describe('planRaid: 숙련도 (설계 수정 2026-10-16-proficiency-amendment.md
   const fourProf = lookup({ e1: '숙련', e2: '숙련', k1: '클경', k2: '클경' });
   const together = (c: Candidate) => c.parties.some((p) => count(p, '숙련') === 2);
 
+  it('proficiencyTracked: 대상 캐릭터 중 하나라도 숙련도를 직접 정했으면(반숙 포함) true, 아무것도 없으면 false', () => {
+    const base = { raid: serkaNormal, friends: four, clears: [], attendeeIds: fourIds };
+    expect(planRaid(base).proficiencyTracked).toBe(false);
+    expect(planRaid({ ...base, proficiency: () => undefined }).proficiencyTracked).toBe(false);
+    expect(planRaid({ ...base, proficiency: (_f, n) => (n === 'k2' ? '반숙' : undefined) }).proficiencyTracked).toBe(true);
+    expect(planRaid({ ...base, proficiency: () => '클경' }).proficiencyTracked).toBe(true);
+    // 대상이 아닌 캐릭터(참석 안 함)에만 값이 있으면 추적하지 않는 것으로 본다
+    expect(planRaid({ ...base, attendeeIds: ['e1', 'e2'], proficiency: (_f, n) => (n === 'k1' ? '숙련' : undefined) }).proficiencyTracked).toBe(false);
+    // 정하지 않은 칸(undefined)은 반숙으로 계산: 아무것도 없을 때 결과는 숙련도를 안 준 것과 같다
+    const none = planRaid({ ...base, limit: 50 });
+    const unset = planRaid({ ...base, limit: 50, proficiency: () => undefined });
+    expect(unset).toEqual(none);
+  });
+
   it('숙련도를 주지 않으면 모두 반숙: 친구 자리에 반숙, 공대 요약은 숙련 0 (숙련자 없음), 전투력 균형은 그대로', () => {
     const r = planRaid({ raid: serkaNormal, friends: four, clears: [], attendeeIds: fourIds });
     const top = r.candidates[0];

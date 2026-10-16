@@ -34,6 +34,15 @@ describe('POST /api/plan', () => {
       .map((s: { character: { name: string }; proficiency: string }) => [s.character.name, s.proficiency]));
     expect(profs).toEqual({ A1: '숙련', B1: '반숙' });
     expect(party.proficiency).toEqual({ 숙련: 1, 반숙: 1, 클경: 0, noExpert: false });
+    expect(json.proficiencyTracked).toBe(true);
+  });
+  it('proficiencyTracked: 아무것도 정하지 않았거나 다른 레이드에만 정했으면 false, 반숙을 직접 정해도 true', async () => {
+    const tracked = async () => (await (await plan({ raidId: 'serka-normal', attendeeIds: ['a', 'b'] })).json()).proficiencyTracked;
+    expect(await tracked()).toBe(false);
+    await store.setProficiency('a', 'A1', '벨가르딘', '숙련');
+    expect(await tracked()).toBe(false);
+    await store.setProficiency('b', 'B1', '세르카', '반숙');
+    expect(await tracked()).toBe(true);
   });
   it('알 수 없는 raidId는 400', async () => {
     const res = await plan({ raidId: 'nope', attendeeIds: ['a'] });

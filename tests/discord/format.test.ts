@@ -141,7 +141,7 @@ describe('formatPlan', () => {
       ]),
     ],
   };
-  const result: PlanResult = { candidates: [first, second], excluded: [{ friendId: 'c', reason: '가능한 캐릭터 없음' }] };
+  const result: PlanResult = { candidates: [first, second], excluded: [{ friendId: 'c', reason: '가능한 캐릭터 없음' }], proficiencyTracked: true };
   const all = [...friends, fr('c', '민수', [ch('C1')])];
 
   it('추천마다 임베드 하나: 제목 "추천 N · 레이드"(첫 번째 ⭐), 설명 = 요약 한 줄, 공대마다 칸 하나, 꼬리말', () => {
@@ -180,6 +180,31 @@ describe('formatPlan', () => {
     expect(e1.footer!.text).toContain('🗓️ 이번 주: 2026-10-14 수요일 06:00 초기화');
     expect(msg.content).toBe('🏰 세르카 하드 공대 추천 2개를 찾았어요');
     expect(JSON.stringify(msg)).not.toContain('분배');
+  });
+
+  it('숙련도를 아무도 정하지 않았으면(추적 안 함) 공대 칸 제목과 구성원 줄은 예전 그대로 (요약·경고·기본 배지 없음)', () => {
+    const plain: Candidate = { ...first, parties: first.parties.map((p) => ({ ...p, slots: p.slots.map((s) => (s.kind === 'friend' ? { ...s, proficiency: '반숙' as const } : s)) })) };
+    for (const r of [{ ...result, candidates: [plain, second], proficiencyTracked: false }, { ...result, candidates: [plain, second], proficiencyTracked: undefined }]) {
+      const msg = formatPlan(serkaHard, r, all, NOW);
+      expectValidEmbeds(msg.embeds);
+      const [e1, e2] = msg.embeds;
+      expect(e1.fields!.map((f) => f.name)).toEqual(['1공대 · 평균 3,800 🟢 여유', '​', '2공대 · 평균 3,000 🔴 위험']);
+      expect(e2.fields![0].name).toBe('1공대 · 평균 정보 없음 ⚪ 모름');
+      const lines = e1.fields![0].value.split('\n');
+      expect(lines[1]).toBe('⚔️ **A1** · 1745 · CP 3,800 · 철수');
+      expect(lines[4]).toBe('🛡️ **B1** · 1740 · 영희');
+      expect(JSON.stringify(msg)).not.toContain('숙련자 없음');
+      expect(JSON.stringify(msg)).not.toContain('◐');
+    }
+  });
+
+  it('추적 중이면 모두 클경인 공대에도 "숙련자 없음" 경고, 숙련자가 있는 공대에는 없음', () => {
+    const allNovice: Candidate = { ...first, parties: first.parties.map((p) => ({ ...p, slots: p.slots.map((s) => (s.kind === 'friend' ? { ...s, proficiency: '클경' as const } : s)) })) };
+    const msg = formatPlan(serkaHard, { candidates: [allNovice], excluded: [], proficiencyTracked: true }, all, NOW);
+    expect(msg.embeds[0].fields!.filter((f) => f.name.includes('⚠️ 숙련자 없음'))).toHaveLength(2);
+    expect(msg.embeds[0].fields![0].value).toContain('**A1** ○클경');
+    const withExpert = formatPlan(serkaHard, result, all, NOW).embeds[0];
+    expect(withExpert.fields![0].name).not.toContain('숙련자 없음');
   });
 
   it('8인 공대: 딜러 3 → 서포터 1 두 묶음을 구분선으로 나눈다', () => {

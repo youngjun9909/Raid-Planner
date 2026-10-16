@@ -5,9 +5,10 @@ import { arrangeParty } from '@/lib/arrange-party';
 import { ROLE_LABEL, formatCP, formatLevel, planSummaryText } from '@/lib/view-model';
 import { TierBadge } from './TierBadge';
 import { ProficiencyBadge, ProficiencySummaryLine } from './ProficiencyBadge';
-import { DEFAULT_PROFICIENCY, partyProficiency } from '@/core/proficiency';
+import { DEFAULT_PROFICIENCY, partyProficiency, showProficiencyBadge } from '@/core/proficiency';
 
-function MemberRow({ s, names }: { s: Slot; names: Map<string, string> }) {
+function MemberRow({ s, names, tracked }: { s: Slot; names: Map<string, string>; tracked: boolean }) {
+  const level = s.kind === 'friend' ? s.proficiency ?? DEFAULT_PROFICIENCY : DEFAULT_PROFICIENCY;
   return s.kind === 'friend' ? (
     <li className="member">
       <span className={`role role--${s.character.role}`}>{ROLE_LABEL[s.character.role]}</span>
@@ -15,7 +16,7 @@ function MemberRow({ s, names }: { s: Slot; names: Map<string, string> }) {
         <span className="member__friend">{names.get(s.friendId) ?? '알 수 없음'}</span>
         <span className="member__line">
           <span className="member__char">{s.character.name}</span>
-          <ProficiencyBadge level={s.proficiency ?? DEFAULT_PROFICIENCY} />
+          {showProficiencyBadge(level, tracked) && <ProficiencyBadge level={level} />}
         </span>
       </span>
       <span className="member__stats">
@@ -31,7 +32,9 @@ function MemberRow({ s, names }: { s: Slot; names: Map<string, string> }) {
   );
 }
 
-function PartyBlock({ party, index, rank, names, size }: { party: Party; index: number; rank: number; names: Map<string, string>; size: number }) {
+function PartyBlock({ party, index, rank, names, size, tracked }: {
+  party: Party; index: number; rank: number; names: Map<string, string>; size: number; tracked: boolean;
+}) {
   const blocks = arrangeParty(party, size);
   const label = `추천 ${rank + 1} ${index + 1}공대`;
   return (
@@ -43,7 +46,7 @@ function PartyBlock({ party, index, rank, names, size }: { party: Party; index: 
           <span className="party__avg-value num">{formatCP(party.dealerAvgCP)}</span>
         </span>
         <TierBadge tier={party.tier} />
-        <ProficiencySummaryLine summary={partyProficiency(party)} />
+        <ProficiencySummaryLine summary={partyProficiency(party)} tracked={tracked} />
       </header>
       <div className="members__cols">
         <span className="members__col members__col--level">레벨</span>
@@ -54,7 +57,7 @@ function PartyBlock({ party, index, rank, names, size }: { party: Party; index: 
           {b > 0 && <hr className="members__divider" />}
           <ul className="members" aria-label={blocks.length > 1 ? `${label} 4인 파티 ${'AB'[b]}` : undefined}>
             {block.map((s, i) => (
-              <MemberRow key={s.kind === 'friend' ? `${s.friendId}:${s.character.name}` : `ext-${i}`} s={s} names={names} />
+              <MemberRow key={s.kind === 'friend' ? `${s.friendId}:${s.character.name}` : `ext-${i}`} s={s} names={names} tracked={tracked} />
             ))}
           </ul>
         </Fragment>
@@ -69,11 +72,14 @@ export function CandidateCard({
   rank,
   friends,
   raidId,
+  proficiencyTracked = false,
 }: {
   candidate: Candidate;
   rank: number;
   friends: Friend[];
   raidId: string;
+  /** 이 편성에서 숙련도를 직접 정한 캐릭터가 있는가 (PlanResult.proficiencyTracked). 없으면 경고/기본 배지를 숨긴다. */
+  proficiencyTracked?: boolean;
 }) {
   const names = new Map(friends.map((f) => [f.id, f.displayName]));
   const titleId = `cand-${raidId}-${rank}`; // 레이드마다 섹션이 따로 있어 레이드 id를 넣어야 겹치지 않는다
@@ -97,7 +103,7 @@ export function CandidateCard({
       </header>
       <div className="candidate__parties" role="group" aria-label={`추천 ${rank + 1} 공대 목록`}>
         {candidate.parties.map((p, i) => (
-          <PartyBlock key={i} party={p} index={i} rank={rank} names={names} size={size} />
+          <PartyBlock key={i} party={p} index={i} rank={rank} names={names} size={size} tracked={proficiencyTracked} />
         ))}
       </div>
       {candidate.parties.length > 1 && candidate.imbalance > 0 && (

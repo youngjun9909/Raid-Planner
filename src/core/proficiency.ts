@@ -20,11 +20,17 @@ export function proficiencyOf(friend: Pick<Friend, 'proficiency'> | undefined, c
   return friend?.proficiency?.[proficiencyKey(characterName, raidName)] ?? DEFAULT_PROFICIENCY;
 }
 
-/** 편성 입력용 조회 함수: 친구 목록(저장소가 숙련도를 붙인 것)에서 그 레이드 이름의 숙련도를 찾는다. */
-export function proficiencyLookup(friends: Friend[], raidName: string): (friendId: string, characterName: string) => Proficiency {
+/**
+ * 편성 입력용 조회 함수: 친구 목록(저장소가 숙련도를 붙인 것)에서 그 레이드 이름에 직접 정한 숙련도를 찾는다.
+ * 정하지 않았으면 undefined (편성은 반숙으로 계산하되, 추적 여부를 알 수 있게).
+ */
+export function proficiencyLookup(friends: Friend[], raidName: string): (friendId: string, characterName: string) => Proficiency | undefined {
   const byId = new Map(friends.map((f) => [f.id, f]));
-  return (friendId, characterName) => proficiencyOf(byId.get(friendId), characterName, raidName);
+  return (friendId, characterName) => byId.get(friendId)?.proficiency?.[proficiencyKey(characterName, raidName)];
 }
+
+/** 숙련도 배지를 보여 줄지: 추적 중이면 모두, 아니면 기본값(반숙)이 아닌 값만. */
+export const showProficiencyBadge = (level: Proficiency, tracked: boolean): boolean => tracked || level !== DEFAULT_PROFICIENCY;
 
 /** 슬롯 목록의 숙련도 요약 (친구 자리만, 표시가 없으면 반숙). */
 export function summarizeProficiency(slots: Slot[]): ProficiencySummary {

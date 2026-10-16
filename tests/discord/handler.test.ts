@@ -515,6 +515,19 @@ describe('/숙련도', () => {
     expect((await store.getFriend('fa'))!.proficiency).toBeUndefined();
   });
 
+  it('아무도 숙련도를 정하지 않았으면 /공대에 숙련도 배지·요약·경고가 없다', async () => {
+    const r = await run(cmd('공대', [{ name: '레이드', value: 'serka-hard' }]));
+    expect(all(r)).toContain('**A1** · ');
+    expect(all(r)).not.toMatch(/숙련자 없음|◐반숙|숙련 0 · 반숙/);
+  });
+
+  it('반숙 하나만 직접 정해도 추적 중: 숙련자 없는 공대에 경고가 붙는다', async () => {
+    await run(prof('A1', '세르카', '반숙'));
+    const r = await run(cmd('공대', [{ name: '레이드', value: 'serka-hard' }]));
+    expect(all(r)).toContain('숙련자 없음');
+    expect(all(r)).toContain('**B1** ◐반숙');
+  });
+
   it('/명령어 도움말에 /숙련도가 나온다', async () => {
     expect(all(await run(cmd('명령어')))).toContain('/숙련도');
   });
