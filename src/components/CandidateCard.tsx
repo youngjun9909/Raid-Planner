@@ -1,8 +1,34 @@
-import type { Candidate, Friend, Party } from '@/core/types';
+import { Fragment } from 'react';
+import type { Candidate, Friend, Party, Slot } from '@/core/types';
+import { getRaid } from '@/core/raids';
+import { arrangeParty } from '@/lib/arrange-party';
 import { ROLE_LABEL, formatCP, formatLevel, planSummaryText } from '@/lib/view-model';
 import { TierBadge } from './TierBadge';
 
-function PartyBlock({ party, index, rank, names }: { party: Party; index: number; rank: number; names: Map<string, string> }) {
+function MemberRow({ s, names }: { s: Slot; names: Map<string, string> }) {
+  return s.kind === 'friend' ? (
+    <li className="member">
+      <span className={`role role--${s.character.role}`}>{ROLE_LABEL[s.character.role]}</span>
+      <span className="member__who">
+        <span className="member__friend">{names.get(s.friendId) ?? '알 수 없음'}</span>
+        <span className="member__char">{s.character.name}</span>
+      </span>
+      <span className="member__stats">
+        <span className="num muted">{formatLevel(s.character.itemLevel)}</span>
+        <span className="num member__cp">{formatCP(s.character.combatPower)}</span>
+      </span>
+    </li>
+  ) : (
+    <li className="member member--external">
+      <span className={`role role--${s.role} role--ghost`}>{ROLE_LABEL[s.role]}</span>
+      <span className="member__who">{s.role === 'support' ? '외부 서포터' : '외부 딜러'}</span>
+    </li>
+  );
+}
+
+function PartyBlock({ party, index, rank, names, size }: { party: Party; index: number; rank: number; names: Map<string, string>; size: number }) {
+  const blocks = arrangeParty(party, size);
+  const label = `추천 ${rank + 1} ${index + 1}공대`;
   return (
     <section className={`party party--${party.tier}`} aria-label={`추천 ${rank + 1} ${index + 1}공대`}>
       <header className="party__head">
@@ -13,28 +39,16 @@ function PartyBlock({ party, index, rank, names }: { party: Party; index: number
         </span>
         <TierBadge tier={party.tier} />
       </header>
-      <ul className="members">
-        {party.slots.map((s, i) =>
-          s.kind === 'friend' ? (
-            <li key={`${s.friendId}:${s.character.name}`} className="member">
-              <span className={`role role--${s.character.role}`}>{ROLE_LABEL[s.character.role]}</span>
-              <span className="member__who">
-                <span className="member__friend">{names.get(s.friendId) ?? '알 수 없음'}</span>
-                <span className="member__char">{s.character.name}</span>
-              </span>
-              <span className="member__stats">
-                <span className="num muted">{formatLevel(s.character.itemLevel)}</span>
-                <span className="num member__cp">{formatCP(s.character.combatPower)}</span>
-              </span>
-            </li>
-          ) : (
-            <li key={`ext-${i}`} className="member member--external">
-              <span className={`role role--${s.role} role--ghost`}>{ROLE_LABEL[s.role]}</span>
-              <span className="member__who">{s.role === 'support' ? '외부 서포터' : '외부 딜러'}</span>
-            </li>
-          ),
-        )}
-      </ul>
+      {blocks.map((block, b) => (
+        <Fragment key={b}>
+          {b > 0 && <hr className="members__divider" />}
+          <ul className="members" aria-label={blocks.length > 1 ? `${label} 4인 파티 ${'AB'[b]}` : undefined}>
+            {block.map((s, i) => (
+              <MemberRow key={s.kind === 'friend' ? `${s.friendId}:${s.character.name}` : `ext-${i}`} s={s} names={names} />
+            ))}
+          </ul>
+        </Fragment>
+      ))}
     </section>
   );
 }
@@ -54,6 +68,7 @@ export function CandidateCard({
   const names = new Map(friends.map((f) => [f.id, f.displayName]));
   const titleId = `cand-${raidId}-${rank}`; // 레이드마다 섹션이 따로 있어 레이드 id를 넣어야 겹치지 않는다
   const best = rank === 0;
+  const size = getRaid(raidId)?.size ?? (candidate.parties[0]?.slots.length === 8 ? 8 : 4);
   return (
     <article className={`candidate${best ? ' candidate--best' : ''}`} aria-labelledby={titleId}>
       <header className="candidate__head">
@@ -72,7 +87,7 @@ export function CandidateCard({
       </header>
       <div className="candidate__parties">
         {candidate.parties.map((p, i) => (
-          <PartyBlock key={i} party={p} index={i} rank={rank} names={names} />
+          <PartyBlock key={i} party={p} index={i} rank={rank} names={names} size={size} />
         ))}
       </div>
       {candidate.parties.length > 1 && candidate.imbalance > 0 && (

@@ -1160,6 +1160,12 @@ select {
   font-size: var(--fs-sm);
 }
 
+.members__divider {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: var(--s2) 0;
+}
+
 .member + .member {
   border-top: 1px dotted var(--line);
 }
