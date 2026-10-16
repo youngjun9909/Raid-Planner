@@ -4,17 +4,36 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RAIDS } from '@/core/raids';
 import type { ClearRecord, Friend, Proficiency, Role } from '@/core/types';
 import { proficiencyKey } from '@/core/proficiency';
+import { targetDifficultyKey } from '@/core/difficulty';
 import { ApiError, api, type ClearInput } from '@/lib/api-client';
-import { applyClearChange, recordsAfterChange, withProficiency } from '@/lib/view-model';
+import { applyClearChange, recordsAfterChange, withProficiency, withTargetDifficulty } from '@/lib/view-model';
 import { createSaveQueue } from '@/lib/save-queue';
 import { PasswordGate, readStoredPassword, storePassword } from '@/components/PasswordGate';
 import { FriendsPanel } from '@/components/FriendsPanel';
-import { ClearsTable } from '@/components/ClearsTable';
+import { CharacterCards } from '@/components/CharacterCards';
 import { ALL_FILTER, ClearsFilter } from '@/components/ClearsFilter';
 import { RaidPicker } from '@/components/RaidPicker';
 import { PlanBoard, type PlanState } from '@/components/PlanBoard';
 
 const CLEARS_FILTER_KEY = 'loa.clearsFilter';
+const CELL_LABEL = { prof: '숙련도', diff: '가는 난이도' } as const;
+
+/** 칸 설정 하나를 친구 목록에 반영 (null이면 지워 기본값으로). */
+function applyCell(
+  list: Friend[],
+  c: { kind: 'prof' | 'diff'; friendId: string; characterName: string; raidName: string; value: string | null },
+): Friend[] {
+  return c.kind === 'prof'
+    ? withProficiency(list, c.friendId, c.characterName, c.raidName, c.value as Proficiency | null)
+    : withTargetDifficulty(list, c.friendId, c.characterName, c.raidName, c.value);
+}
+
+/** 서버 사본에서 칸 설정 하나를 읽는다 (정하지 않았으면 null). */
+function readCell(f: Friend | undefined, kind: 'prof' | 'diff', characterName: string, raidName: string): string | null {
+  return kind === 'prof'
+    ? f?.proficiency?.[proficiencyKey(characterName, raidName)] ?? null
+    : f?.targetDifficulty?.[targetDifficultyKey(characterName, raidName)] ?? null;
+}
 const message = (e: unknown) => (e instanceof Error ? e.message : '알 수 없는 오류가 났어요');
 
 /** 다음 주간 초기화(수요일 06:00 KST)까지 남은 시간. */
@@ -58,25 +77,30 @@ export default function Home() {
     ),
   );
 
-  // 숙련도는 칸(친구 × 캐릭터 × 레이드 이름)마다 하나씩 순서대로 저장하고, 대기 중인 변경은 최신 값 하나로 합친다.
-  type ProfSave = { password: string; friendId: string; characterName: string; raidName: string; level: Proficiency | null };
-  const [profQueue] = useState(() =>
-    createSaveQueue<ProfSave>((_cell, v) =>
-      api.setProficiency(v.password, v.friendId, v.characterName, v.raidName, v.level).then(() => undefined),
+  /**
+   * 칸(친구 × 캐릭터 × 레이드 이름) 설정: 숙련도(prof)와 가는 난이도(diff). 칸마다 하나씩 순서대로 저장하고,
+   * 대기 중인 변경은 최신 값 하나로 합친다. 칸 키는 JSON 배열 문자열 (구분자가 이름과 겹치지 않게).
+   */
+  type CellKind = 'prof' | 'diff';
+  type Cell = { kind: CellKind; friendId: string; characterName: string; raidName: string; value: string | null };
+  const [cellQueue] = useState(() =>
+    createSaveQueue<Cell & { password: string }>((_cell, v) =>
+      (v.kind === 'prof'
+        ? api.setProficiency(v.password, v.friendId, v.characterName, v.raidName, v.value as Proficiency | null)
+        : api.setTargetDifficulty(v.password, v.friendId, v.characterName, v.raidName, v.value)
+      ).then(() => undefined),
     ),
   );
 
   /**
-   * 칸 키는 JSON 배열 문자열 (구분자가 이름과 겹치지 않게). pendingProf는 아직 저장이 끝나지 않은 낙관적 값으로,
-   * 서버 사본으로 친구를 바꿀 때(전투력/역할 저장 등) 다시 덮어 써서 화면 값이 되돌아가지 않게 한다.
-   * profGen은 칸별 변경 번호: 실패한 저장보다 새 변경이 시작됐으면 되돌리지 않는다.
+   * pendingCells는 아직 저장이 끝나지 않은 낙관적 값으로, 서버 사본으로 친구를 바꿀 때(전투력/역할 저장 등)
+   * 다시 덮어 써서 화면 값이 되돌아가지 않게 한다. cellGen은 칸별 변경 번호: 실패한 저장보다 새 변경이 시작됐으면 되돌리지 않는다.
    */
-  type PendingProf = { friendId: string; characterName: string; raidName: string; level: Proficiency | null };
-  const pendingProf = useRef(new Map<string, PendingProf>());
-  const profGen = useRef(new Map<string, number>());
+  const pendingCells = useRef(new Map<string, Cell>());
+  const cellGen = useRef(new Map<string, number>());
   const withPending = useCallback((list: Friend[]): Friend[] => {
     let out = list;
-    for (const p of pendingProf.current.values()) out = withProficiency(out, p.friendId, p.characterName, p.raidName, p.level);
+    for (const p of pendingCells.current.values()) out = applyCell(out, p);
     return out;
   }, []);
 
@@ -209,31 +233,55 @@ export default function Home() {
     }
   }
 
-  async function changeProficiency(friendId: string, characterName: string, raidName: string, level: Proficiency | null) {
-    if (!password) return;
-    const cell = JSON.stringify([friendId, characterName, raidName]);
-    const gen = (profGen.current.get(cell) ?? 0) + 1;
-    profGen.current.set(cell, gen);
-    const isLatest = () => profGen.current.get(cell) === gen;
-    pendingProf.current.set(cell, { friendId, characterName, raidName, level });
-    // 먼저 화면에 반영하고(낙관적 업데이트) 저장은 칸별 순서대로.
-    setFriends((prev) => (prev ? withProficiency(prev, friendId, characterName, raidName, level) : prev));
-    setNotice(null);
-    const res = await profQueue.save(cell, { password, friendId, characterName, raidName, level });
-    if (isLatest()) pendingProf.current.delete(cell);
+  /**
+   * 칸 설정 하나를 바꾼다 (먼저 화면에 반영하고 저장은 칸별 순서대로). 실패하면 서버 값으로 되돌린다.
+   * 돌려주는 값: 이 변경이 실패로 끝났으면 오류 문구, 아니면 null. quiet이면 안내 문구는 부르는 쪽이 띄운다.
+   */
+  async function changeCell(cell: Cell, quiet = false): Promise<string | null> {
+    if (!password) return null;
+    const { kind, friendId, characterName, raidName } = cell;
+    const key = JSON.stringify([kind, friendId, characterName, raidName]);
+    const gen = (cellGen.current.get(key) ?? 0) + 1;
+    cellGen.current.set(key, gen);
+    const isLatest = () => cellGen.current.get(key) === gen;
+    pendingCells.current.set(key, cell);
+    setFriends((prev) => (prev ? applyCell(prev, cell) : prev));
+    if (!quiet) setNotice(null);
+    const res = await cellQueue.save(key, { ...cell, password });
+    if (isLatest()) pendingCells.current.delete(key);
     if (res.ok) {
       setVersion((v) => v + 1);
-      return;
+      return null;
     }
-    if (res.superseded || !isLatest()) return; // 더 새 값이 곧(또는 이미) 저장된다
-    setNotice(`${characterName}의 ${raidName} 숙련도를 저장하지 못했어요: ${handle(res.error)}`);
+    if (res.superseded || !isLatest()) return null; // 더 새 값이 곧(또는 이미) 저장된다
+    const msg = handle(res.error);
+    if (!quiet) setNotice(`${characterName}의 ${raidName} ${CELL_LABEL[kind]}를 저장하지 못했어요: ${msg}`);
     try {
       const server = await api.listFriends(password);
-      if (!isLatest()) return; // 재조회하는 사이 새 변경이 시작됐으면 그 값을 지킨다
-      const saved = server.find((f) => f.id === friendId)?.proficiency?.[proficiencyKey(characterName, raidName)] ?? null;
-      setFriends((prev) => (prev ? withProficiency(prev, friendId, characterName, raidName, saved) : prev));
+      if (!isLatest()) return msg; // 재조회하는 사이 새 변경이 시작됐으면 그 값을 지킨다
+      const saved = readCell(server.find((f) => f.id === friendId), kind, characterName, raidName);
+      setFriends((prev) => (prev ? applyCell(prev, { ...cell, value: saved }) : prev));
     } catch {
       /* 재조회도 실패하면 안내 문구만 남긴다 */
+    }
+    return msg;
+  }
+
+  const changeProficiency = (friendId: string, characterName: string, raidName: string, level: Proficiency | null) =>
+    void changeCell({ kind: 'prof', friendId, characterName, raidName, value: level });
+  const changeTargetDifficulty = (friendId: string, characterName: string, raidName: string, value: string | null) =>
+    void changeCell({ kind: 'diff', friendId, characterName, raidName, value });
+
+  /** 카드 단위: 이 캐릭터의 모든 레이드 칩 숙련도를 같은 값으로 (칸마다 PUT 하나). 실패한 레이드는 모아서 알린다. */
+  async function bulkProficiency(friendId: string, characterName: string, raidNames: string[], level: Proficiency) {
+    setNotice(null);
+    const results = await Promise.all(
+      raidNames.map((raidName) => changeCell({ kind: 'prof', friendId, characterName, raidName, value: level }, true)),
+    );
+    const failed = raidNames.filter((_, i) => results[i] !== null);
+    if (failed.length > 0) {
+      const msg = results.find((r) => r !== null);
+      setNotice(`${characterName}의 숙련도를 ${failed.length}개 레이드(${failed.join(', ')})에서 저장하지 못했어요: ${msg}`);
     }
   }
 
@@ -378,7 +426,9 @@ export default function Home() {
             <section className="panel" aria-labelledby="sec-clears">
               <div className="panel__head">
                 <h2 id="sec-clears" className="panel__title">이번 주 클리어</h2>
-                <p className="panel__hint muted">이미 다녀온 레이드는 난이도를 골라 두세요. 그 캐릭터만 후보에서 빠져요. 아래 칸은 숙련도(숙련·반숙·클경)예요.</p>
+                <p className="panel__hint muted">
+                  다녀온 레이드 칩을 한 번 누르면 ✓로 바뀌고 그 캐릭터는 후보에서 빠져요. 칩 옆 ⋯에서 가는 난이도와 숙련도를 바꿀 수 있어요.
+                </p>
               </div>
               {notice && (
                 <p className="alert alert--error" role="alert">
@@ -386,14 +436,16 @@ export default function Home() {
                 </p>
               )}
               <ClearsFilter friends={friends} value={activeFilter} onChange={chooseClearsFilter} />
-              <ClearsTable
+              <CharacterCards
                 friends={activeFilter === ALL_FILTER ? friends : friends.filter((f) => f.id === activeFilter)}
                 showFriendNames={activeFilter === ALL_FILTER}
                 clears={clears}
                 onClearChange={changeClear}
                 onCombatPower={saveCombatPower}
                 onRole={saveRole}
+                onTargetDifficulty={changeTargetDifficulty}
                 onProficiency={changeProficiency}
+                onBulkProficiency={bulkProficiency}
               />
             </section>
 

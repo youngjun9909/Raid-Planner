@@ -553,113 +553,329 @@ select {
   }
 }
 
-/* ---------- 클리어 표 ---------- */
+/* ---------- 이번 주 클리어: 캐릭터 카드 + 레이드 칩 ---------- */
 
-.table-scroll {
-  overflow-x: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  max-width: 100%;
+.roster-cards {
+  display: grid;
+  gap: var(--s5);
+  min-width: 0;
 }
 
-.roster {
-  border-collapse: separate;
-  border-spacing: 0;
-  width: 100%;
-  min-width: 1080px;
-  font-size: var(--fs-sm);
+.roster-cards__group {
+  display: grid;
+  gap: var(--s3);
+  min-width: 0;
 }
 
-.roster th,
-.roster td {
-  padding: var(--s2) var(--s3);
-  text-align: left;
-  vertical-align: middle;
-  border-bottom: 1px solid var(--line);
-}
-
-.roster thead th {
-  position: sticky;
-  top: 0;
-  background: var(--surface-2);
-  font-weight: 600;
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
-  line-height: 1.35;
-  white-space: nowrap;
-}
-
-.roster thead .roster__raid {
-  min-width: 118px;
-  white-space: normal;
-}
-
-.roster .num-col {
-  text-align: right;
-  white-space: nowrap;
-}
-
-.roster__sticky {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  background: var(--surface);
-  box-shadow: 1px 0 0 var(--line);
-}
-
-.roster thead .roster__sticky {
-  z-index: 2;
-  background: var(--surface-2);
-}
-
-.roster__friend th {
-  padding-top: var(--s4);
-  background: var(--surface);
-  border-bottom-color: var(--line-strong);
-}
-
-.roster__friend-name {
-  position: sticky;
-  left: var(--s3);
+.roster-cards__friend {
   font-family: var(--font-display);
   font-weight: 800;
   font-size: var(--fs-md);
+  line-height: 1.3;
   color: var(--accent-strong);
+  padding-bottom: var(--s1);
+  border-bottom: 1px solid var(--line-strong);
 }
 
-.roster__char {
-  font-weight: 400;
-  min-width: 132px;
+/* 폰에서는 1열, 넓으면 2~3열. 카드 높이는 내용만큼 (칩 수가 캐릭터마다 다르다) */
+.ccards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  align-items: start;
+  gap: var(--s3);
 }
 
-.roster__char-name {
-  display: block;
-  font-weight: 600;
-  font-size: var(--fs-base);
+.ccard {
+  display: grid;
+  gap: var(--s3);
+  min-width: 0;
+  padding: var(--s3) var(--s4) var(--s4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
 }
 
-.roster__char .muted {
+.ccard__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s1) var(--s2);
+}
+
+.ccard__id {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--s2);
+  min-width: 0;
+}
+
+.ccard__name {
+  font-weight: 700;
+  font-size: 1.0625rem;
+  line-height: 1.35;
+}
+
+.ccard__class {
   font-size: var(--fs-xs);
 }
 
-.roster__group tr:last-child td,
-.roster__group tr:last-child th {
-  border-bottom-color: var(--line-strong);
+.ccard__stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s1) var(--s5);
+  margin: 0;
+  font-size: var(--fs-sm);
 }
 
-.roster .select {
-  min-height: 36px;
-  padding: 6px var(--s2);
-  font-size: var(--fs-sm);
+.ccard__stat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--s2);
+  min-width: 0;
+}
+
+.ccard__stat dt {
+  font-size: var(--fs-xs);
   color: var(--text-muted);
 }
 
-.roster .select--done {
-  color: var(--accent-strong);
-  border-color: var(--accent);
-  background: var(--accent-soft);
+.ccard__stat dd {
+  margin: 0;
   font-weight: 600;
+}
+
+.ccard__stat--cp .cp-form {
+  justify-content: flex-start;
+}
+
+.ccard__stat--cp .cp-form__error {
+  text-align: left;
+}
+
+.rchips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
+.rchip {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* 설정 칸이 열린 칩은 한 줄을 다 쓰고 그 아래에 칸을 펼친다 */
+.rchip--open {
+  flex-basis: 100%;
+}
+
+.rchip__row {
+  display: inline-flex;
+  align-self: flex-start;
+  max-width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  transition: background-color 120ms, border-color 120ms;
+}
+
+.rchip__toggle,
+.rchip__more {
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rchip__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px var(--s2) 6px var(--s3);
+  border-radius: 999px 0 0 999px;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+  text-align: left;
+}
+
+.rchip__icon {
+  flex: none;
+  width: 1em;
+  font-weight: 700;
+  text-align: center;
+}
+
+.rchip__name {
+  font-weight: 600;
+}
+
+.rchip__diff {
+  white-space: nowrap;
+}
+
+.rchip__more {
+  position: relative;
+  flex: none;
+  min-width: 40px;
+  padding: 0 var(--s2);
+  border-left: 1px solid var(--line);
+  border-radius: 0 999px 999px 0;
+  color: var(--text-muted);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+/* 가는 난이도나 숙련도를 직접 정한 칩: ⋯ 위의 작은 점 (접근성 이름에도 "직접 정한 값 있음") */
+.rchip__dot {
+  position: absolute;
+  top: 7px;
+  right: 9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.rchip__row:hover {
+  border-color: var(--accent);
+}
+
+.rchip__toggle:hover:not(:disabled),
+.rchip__more:hover {
+  background: var(--accent-soft);
+}
+
+.rchip__more[aria-expanded='true'] {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.rchip--done .rchip__row {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.rchip--done .rchip__toggle:hover:not(:disabled),
+.rchip--done .rchip__more:hover {
+  background: var(--accent-strong);
+}
+
+.rchip--done .rchip__more {
+  color: var(--accent-ink);
+  border-left-color: color-mix(in srgb, var(--accent-ink) 30%, transparent);
+}
+
+.rchip--done .rchip__more[aria-expanded='true'] {
+  background: var(--accent-strong);
+}
+
+.rchip--done .rchip__dot {
+  background: var(--accent-ink);
+}
+
+/* 안 감: 흐리게, 점선 (누를 수 없고 ⋯에서 바꾼다) */
+.rchip--skip .rchip__row {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.rchip--skip .rchip__toggle {
+  cursor: default;
+}
+
+.rchip--skip .rchip__name {
+  font-weight: 500;
+}
+
+.rchip__panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: var(--s3);
+  margin-top: var(--s2);
+  padding: var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.rchip__field {
+  display: grid;
+  gap: var(--s1);
+  min-width: 0;
+}
+
+.rchip__field-label {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.rchip__field-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  min-width: 0;
+}
+
+.rchip__set {
+  color: var(--accent-strong);
+}
+
+.rchip__close {
+  grid-column: 1 / -1;
+  justify-self: end;
+  min-height: 40px;
+  padding-inline: var(--s3);
+}
+
+.select--setting {
+  flex: 1 1 9em;
+  width: auto;
+  min-height: 40px;
+  padding: 6px var(--s2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+/* 기본값(자동, 반숙 (기본), —): 흐리게, 점선 테두리 */
+.select--default {
+  color: var(--text-muted);
+  border-style: dashed;
+  font-weight: 400;
+}
+
+.ccard__bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  padding-top: var(--s3);
+  border-top: 1px dotted var(--line);
+}
+
+.ccard__bulk-label {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.ccard__bulk .select {
+  flex: 0 1 9em;
 }
 
 .cp {
@@ -1276,44 +1492,22 @@ select {
 
 /* ---------- 숙련도 ---------- */
 
-/* 클리어 표 칸: 클리어 드롭다운 아래 숙련도 선택 */
-.raid-cell {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s1);
-}
-
-.roster .select--prof {
-  min-height: 36px;
-  padding: 4px var(--s2);
-  font-size: var(--fs-xs);
-}
-
-/* 정하지 않음(기본값 반숙): 흐리게, 점선 테두리 */
-.roster .select--prof-default {
-  color: var(--text-muted);
-  border-style: dashed;
-  opacity: 0.8;
-}
-
-.roster .select--prof-expert {
+/* 칩 설정 칸의 숙련도 선택 (기본값 반숙은 위의 .select--default로 흐리게) */
+.select--prof-expert {
   color: var(--prof-expert);
   border-color: var(--prof-expert);
   background: var(--prof-expert-bg);
-  font-weight: 600;
 }
 
-.roster .select--prof-mid {
+.select--prof-mid {
   color: var(--text);
   border-color: var(--line-strong);
-  font-weight: 600;
 }
 
-.roster .select--prof-novice {
+.select--prof-novice {
   color: var(--prof-novice);
   border-color: var(--prof-novice);
   background: var(--prof-novice-bg);
-  font-weight: 600;
 }
 
 /* 추천 카드: 캐릭터 이름 옆 배지 */

@@ -21,6 +21,7 @@ let clears: ClearRecord[];
 let planResult: PlanResult;
 let putResponder: ((body: { characterName: string; records: unknown[] }) => Promise<Response>) | null;
 let profResponder: ((body: { characterName: string; raidName: string; level: string | null }) => Promise<Response>) | null;
+let diffResponder: ((body: { characterName: string; raidName: string; difficulty: string | null }) => Promise<Response>) | null;
 /** 처음 불러오기 다음의 GET /api/friends 응답 (되돌리기용 재조회를 늦추는 데 쓴다). */
 let friendsResponder: (() => Promise<Response>) | null;
 
@@ -33,6 +34,7 @@ beforeEach(() => {
   planResult = { candidates: [], excluded: [] };
   putResponder = null;
   profResponder = null;
+  diffResponder = null;
   friendsResponder = null;
   localStorage.setItem(PASSWORD_KEY, 'pw');
   vi.stubGlobal(
@@ -60,6 +62,7 @@ beforeEach(() => {
       }
       if (url.startsWith('/api/friends/') && method === 'DELETE') return json({ ok: true });
       if (url.endsWith('/proficiency')) return profResponder ? profResponder(body) : json(FRIENDS[0]);
+      if (url.endsWith('/target-difficulty')) return diffResponder ? diffResponder(body) : json(FRIENDS[0]);
       if (url.endsWith('/role')) {
         const f = structuredClone(FRIENDS[0]);
         const c = f.characters.find((x) => x.name === body.characterName)!;
@@ -78,35 +81,54 @@ afterEach(() => {
 });
 
 const planCalls = () => calls.filter((c) => c.url === '/api/plan');
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** 레이드 칩(클리어 토글 버튼). 이름은 "가나 세르카 하드: 미완" / "가나 세르카 노말: 갔음" / "가나 세르카: 안 감". */
+const chipName = (char: string, raid: string) => new RegExp(`^${esc(char)} ${esc(raid)}( \\S+)?: `);
+const chip = (char: string, raid: string) => screen.getByRole('button', { name: chipName(char, raid) });
+const queryChip = (char: string, raid: string) => screen.queryByRole('button', { name: chipName(char, raid) });
+const settingsBtn = (char: string, raid: string) => screen.getByRole('button', { name: new RegExp(`^${esc(char)} ${esc(raid)} 설정`) });
+const openSettings = (char: string, raid: string) => fireEvent.click(settingsBtn(char, raid));
+// 기본 픽스처(아이템 레벨 1730)가 갈 수 있는 레이드 이름 (벨가르딘은 1750부터라 칩이 없다)
+const RAIDS_1730 = ['카제로스 3막 (모르둠)', '카제로스 4막 (아르모체)', '지평의 성당', '카제로스 종막 (카제로스)', '세르카'];
 
 async function renderLoaded() {
   render(<Home />);
-  await screen.findByRole('combobox', { name: '가나 세르카 클리어' });
+  await screen.findByRole('button', { name: chipName('가나', '세르카') });
 }
 
 describe('웹 화면', () => {
-  it('친구 목록 표에 캐릭터별 레이드 체크 칸이 보인다 (캐릭터 × 레이드 이름)', async () => {
+  it('캐릭터 카드마다 갈 수 있는 레이드 이름에만 칩이 있고, 칩에 가는 난이도(또는 간 난이도 ✓)가 보인다', async () => {
     clears = [{ characterName: '가나', raidName: '세르카', difficulty: '노말' }];
     await renderLoaded();
     for (const name of ['가나', '가나서폿', '다라']) {
-      for (const raid of ['카제로스 3막 (모르둠)', '카제로스 4막 (아르모체)', '지평의 성당', '카제로스 종막 (카제로스)', '세르카', '벨가르딘']) {
-        expect(screen.getByRole('combobox', { name: `${name} ${raid} 클리어` })).toBeInTheDocument();
-      }
+      const list = screen.getByRole('list', { name: `${name} 레이드` });
+      // 칩(aria-pressed가 있는 버튼)은 갈 수 있는 레이드 이름마다 하나, 설정 순서로
+      const toggles = within(list).getAllByRole('button').filter((b) => b.hasAttribute('aria-pressed'));
+      expect(toggles.map((b) => b.getAttribute('aria-label')!.replace(/ \S+: .*$/, ''))).toEqual(RAIDS_1730.map((r) => `${name} ${r}`));
+      // 칩마다 설정(⋯) 버튼이 하나
+      expect(within(list).getAllByRole('button', { name: / 설정/ })).toHaveLength(RAIDS_1730.length);
+      expect(queryChip(name, '벨가르딘')).toBeNull(); // 1730은 벨가르딘(1750)을 못 간다
     }
-    const serka = screen.getByRole('combobox', { name: '가나 세르카 클리어' }) as HTMLSelectElement;
-    expect(serka.value).toBe('노말');
-    expect(within(serka).getAllByRole('option').map((o) => o.textContent)).toEqual(['안 감', '노말', '하드', '나이트메어']);
+    const serka = chip('가나', '세르카');
+    expect(serka).toHaveAccessibleName('가나 세르카 노말: 갔음'); // 가는 난이도(하드)와 달라도 간 난이도로 ✓
+    expect(serka).toHaveAttribute('aria-pressed', 'true');
+    expect(serka).toHaveTextContent('✓세르카 · 노말');
+    const armoche = chip('가나', '카제로스 4막 (아르모체)');
+    expect(armoche).toHaveAccessibleName('가나 카제로스 4막 (아르모체) 하드: 미완'); // 자동 기본값 = 입장 가능한 가장 높은 난이도
+    expect(armoche).toHaveAttribute('aria-pressed', 'false');
+    expect(armoche).toHaveTextContent('○카제로스 4막 (아르모체) · 하드');
+    expect(chip('가나', '지평의 성당')).toHaveAccessibleName('가나 지평의 성당 2단계: 미완');
     expect(calls.every((c) => c.password === 'pw')).toBe(true);
   });
 
-  it('체크를 바꾸면 PUT /api/clears가 호출되고 공대 후보가 다시 불려온다', async () => {
+  it('칩을 한 번 누르면 가는 난이도로 클리어를 기록하고(캐릭터의 전체 기록으로 PUT) 공대 후보를 다시 불러온다', async () => {
     clears = [{ characterName: '가나', raidName: '벨가르딘', difficulty: '노말' }];
     await renderLoaded();
-    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 노말' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 하드' }));
     await waitFor(() => expect(planCalls()).toHaveLength(1));
-    expect(planCalls()[0].body).toEqual({ raidId: 'serka-normal', attendeeIds: ['f1', 'f2'] });
+    expect(planCalls()[0].body).toEqual({ raidId: 'serka-hard', attendeeIds: ['f1', 'f2'] });
 
-    fireEvent.change(screen.getByRole('combobox', { name: '가나 세르카 클리어' }), { target: { value: '하드' } });
+    fireEvent.click(chip('가나', '세르카'));
     await waitFor(() => expect(planCalls()).toHaveLength(2));
     const put = calls.find((c) => c.url === '/api/clears' && c.method === 'PUT');
     expect(put?.body).toEqual({
@@ -116,19 +138,36 @@ describe('웹 화면', () => {
         { raidName: '세르카', difficulty: '하드' },
       ],
     });
+    expect(chip('가나', '세르카')).toHaveAccessibleName('가나 세르카 하드: 갔음');
+    expect(chip('가나', '세르카')).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('같은 레이드의 두 번째 난이도를 고르면 첫 번째 난이도가 해제된다', async () => {
+  it('다른 난이도로 간 칩을 누르면 그 기록을 지우고, 다시 누르면 가는 난이도 하나만 남는다 (한 레이드는 한 난이도)', async () => {
     clears = [{ characterName: '가나', raidName: '세르카', difficulty: '노말' }];
     await renderLoaded();
-    const select = screen.getByRole('combobox', { name: '가나 세르카 클리어' }) as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: '나이트메어' } });
-    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true));
-    expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
+    fireEvent.click(chip('가나', '세르카'));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1));
+    expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ characterName: '가나', records: [] });
+    expect(chip('가나', '세르카')).toHaveAccessibleName('가나 세르카 하드: 미완');
+    fireEvent.click(chip('가나', '세르카'));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(2));
+    expect(calls.filter((c) => c.method === 'PUT')[1].body).toEqual({
       characterName: '가나',
-      records: [{ raidName: '세르카', difficulty: '나이트메어' }],
+      records: [{ raidName: '세르카', difficulty: '하드' }],
     });
-    expect(select.value).toBe('나이트메어');
+    expect(chip('가나', '세르카')).toHaveAccessibleName('가나 세르카 하드: 갔음');
+  });
+
+  it('1700 미만 캐릭터는 응답에 섞여 있어도 카드와 필터 수에 나오지 않는다', async () => {
+    FRIENDS[0].characters = [ch('가나'), ch('가나서폿', 'support', null), ch('낮은캐', 'dealer', 9999, 1690)];
+    try {
+      await renderLoaded();
+      expect(screen.queryByText('낮은캐')).toBeNull();
+      expect(screen.queryByRole('list', { name: '낮은캐 레이드' })).toBeNull();
+      expect(within(screen.getByRole('group', { name: '친구별로 보기' })).getByRole('button', { name: /^영준/ })).toHaveTextContent('영준 2');
+    } finally {
+      FRIENDS[0].characters = [ch('가나'), ch('가나서폿', 'support', null)];
+    }
   });
 
   // 영준(f1): 가나 + 가나서폿 두 캐릭터로 1공대·2공대에, 민수(f2): 다라로 1공대에만
@@ -174,7 +213,7 @@ describe('웹 화면', () => {
   it('추천 카드: "추천 N"(첫 번째에 ⭐), 요약 한 줄, 공대가 카드 안에 1공대·2공대 순서로 쌓인다', async () => {
     planResult = { candidates: [multiRun, friendsOnly], excluded: [] };
     await renderLoaded();
-    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 노말' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 하드' }));
     const first = await screen.findByRole('article', { name: /추천 1/ });
     const second = screen.getByRole('article', { name: /추천 2/ });
     expect(within(first).getByRole('heading', { level: 4 })).toHaveTextContent('⭐추천 1');
@@ -206,14 +245,14 @@ describe('웹 화면', () => {
   it('"숙련자 없음" 경고는 계획 응답의 proficiencyTracked가 true일 때만 보인다', async () => {
     planResult = { candidates: [friendsOnly], excluded: [] };
     await renderLoaded();
-    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 노말' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 하드' }));
     const card = await screen.findByRole('article', { name: /추천 1/ });
     expect(within(card).getByText('숙련 0 · 반숙 2 · 클경 0')).toBeInTheDocument();
     expect(within(card).queryByText('숙련자 없음')).toBeNull();
     cleanup();
     planResult = { candidates: [friendsOnly], excluded: [], proficiencyTracked: true };
     await renderLoaded();
-    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 노말' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 하드' }));
     const tracked = await screen.findByRole('article', { name: /추천 1/ });
     expect(within(tracked).getByText('숙련자 없음')).toBeInTheDocument();
   });
@@ -225,7 +264,7 @@ describe('웹 화면', () => {
       reason: '참석할 수 있는 캐릭터가 없어요',
     };
     await renderLoaded();
-    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 노말' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 하드' }));
     const reason = await screen.findByText('참석할 수 있는 캐릭터가 없어요');
     const plan = reason.closest('section')!;
     expect(within(plan).getByText('민수').closest('li')).toHaveTextContent('민수 가능한 캐릭터 없음');
@@ -289,8 +328,8 @@ describe('웹 화면', () => {
     fireEvent.click(within(screen.getByRole('group', { name: '영준 삭제 확인' })).getByRole('button', { name: '삭제하기' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true));
     expect(calls.find((c) => c.method === 'DELETE')!.url).toBe('/api/friends/f1');
-    await waitFor(() => expect(screen.queryByRole('combobox', { name: '가나 세르카 클리어' })).not.toBeInTheDocument());
-    expect(screen.getByRole('combobox', { name: '다라 세르카 클리어' })).toBeInTheDocument();
+    await waitFor(() => expect(queryChip('가나', '세르카')).not.toBeInTheDocument());
+    expect(chip('다라', '세르카')).toBeInTheDocument();
   });
 
   it('저장된 비밀번호가 없으면 비밀번호 입력창을 먼저 보여 준다', async () => {
@@ -299,7 +338,7 @@ describe('웹 화면', () => {
     const input = await screen.findByLabelText('비밀번호');
     fireEvent.change(input, { target: { value: 'pw' } });
     fireEvent.submit(input.closest('form')!);
-    await screen.findByRole('combobox', { name: '가나 세르카 클리어' });
+    await screen.findByRole('button', { name: chipName('가나', '세르카') });
     expect(localStorage.getItem(PASSWORD_KEY)).toBe('pw');
   });
 
@@ -315,7 +354,6 @@ describe('웹 화면', () => {
     let server: Record<string, unknown[]>;
     const putBodies = () => calls.filter((c) => c.url === '/api/clears' && c.method === 'PUT').map((c) => c.body);
     const clearGets = () => calls.filter((c) => c.url === '/api/clears' && c.method === 'GET');
-    const select = (raid: string) => screen.getByRole('combobox', { name: `가나 ${raid} 클리어` }) as HTMLSelectElement;
 
     beforeEach(() => {
       gates = [];
@@ -333,11 +371,11 @@ describe('웹 화면', () => {
         });
     });
 
-    it('두 번 연달아 바꾸면 두 번째 저장은 첫 번째가 끝난 뒤 최신 기록 전체로 보낸다', async () => {
+    it('두 칩을 연달아 누르면 두 번째 저장은 첫 번째가 끝난 뒤 최신 기록 전체로 보낸다', async () => {
       await renderLoaded();
-      fireEvent.change(select('세르카'), { target: { value: '노말' } });
+      fireEvent.click(chip('가나', '세르카'));
       await waitFor(() => expect(gates).toHaveLength(1));
-      fireEvent.change(select('벨가르딘'), { target: { value: '하드' } });
+      fireEvent.click(chip('가나', '지평의 성당'));
       await new Promise((r) => setTimeout(r, 20));
       expect(putBodies()).toHaveLength(1); // 첫 요청이 끝나기 전에는 두 번째를 보내지 않는다
 
@@ -346,28 +384,47 @@ describe('웹 화면', () => {
       gates[1].ok();
       await waitFor(() => expect(server['가나']).toHaveLength(2));
       expect(putBodies()).toEqual([
-        { characterName: '가나', records: [{ raidName: '세르카', difficulty: '노말' }] },
+        { characterName: '가나', records: [{ raidName: '세르카', difficulty: '하드' }] },
         {
           characterName: '가나',
           records: [
-            { raidName: '세르카', difficulty: '노말' },
-            { raidName: '벨가르딘', difficulty: '하드' },
+            { raidName: '세르카', difficulty: '하드' },
+            { raidName: '지평의 성당', difficulty: '2단계' },
           ],
         },
       ]);
       expect(server['가나']).toEqual([
-        { raidName: '세르카', difficulty: '노말' },
-        { raidName: '벨가르딘', difficulty: '하드' },
+        { raidName: '세르카', difficulty: '하드' },
+        { raidName: '지평의 성당', difficulty: '2단계' },
       ]);
-      expect(select('세르카').value).toBe('노말');
-      expect(select('벨가르딘').value).toBe('하드');
+      expect(chip('가나', '세르카')).toHaveAttribute('aria-pressed', 'true');
+      expect(chip('가나', '지평의 성당')).toHaveAccessibleName('가나 지평의 성당 2단계: 갔음');
+    });
+
+    it('같은 칩을 빠르게 두 번 누르면 하나씩 순서대로 보내고 마지막 상태(해제)로 끝난다', async () => {
+      await renderLoaded();
+      fireEvent.click(chip('가나', '세르카'));
+      await waitFor(() => expect(gates).toHaveLength(1));
+      fireEvent.click(chip('가나', '세르카'));
+      expect(chip('가나', '세르카')).toHaveAttribute('aria-pressed', 'false'); // 먼저 화면에 반영
+      await new Promise((r) => setTimeout(r, 20));
+      expect(gates).toHaveLength(1);
+      gates[0].ok();
+      await waitFor(() => expect(gates).toHaveLength(2));
+      gates[1].ok();
+      await waitFor(() => expect(server['가나']).toEqual([]));
+      expect(putBodies()).toEqual([
+        { characterName: '가나', records: [{ raidName: '세르카', difficulty: '하드' }] },
+        { characterName: '가나', records: [] },
+      ]);
+      expect(chip('가나', '세르카')).toHaveAccessibleName('가나 세르카 하드: 미완');
     });
 
     it('첫 저장이 실패해도 대기 중인 새 변경을 서버 값으로 덮어쓰지 않는다', async () => {
       await renderLoaded();
-      fireEvent.change(select('세르카'), { target: { value: '노말' } });
+      fireEvent.click(chip('가나', '세르카'));
       await waitFor(() => expect(gates).toHaveLength(1));
-      fireEvent.change(select('벨가르딘'), { target: { value: '하드' } });
+      fireEvent.click(chip('가나', '지평의 성당'));
       gates[0].fail();
       await waitFor(() => expect(gates).toHaveLength(2));
       expect(gates[1].body.records).toHaveLength(2);
@@ -375,52 +432,84 @@ describe('웹 화면', () => {
       await waitFor(() => expect(server['가나']).toHaveLength(2));
       await new Promise((r) => setTimeout(r, 20));
       expect(clearGets()).toHaveLength(1); // 처음 불러온 것 말고는 되돌리기용 재조회가 없다
-      expect(select('세르카').value).toBe('노말');
-      expect(select('벨가르딘').value).toBe('하드');
+      expect(chip('가나', '세르카')).toHaveAttribute('aria-pressed', 'true');
+      expect(chip('가나', '지평의 성당')).toHaveAttribute('aria-pressed', 'true');
       expect(screen.queryByText(/저장하지 못했어요/)).not.toBeInTheDocument();
     });
 
     it('대기 중인 변경 없이 실패하면 서버 값으로 되돌리고 안내한다', async () => {
       await renderLoaded();
-      fireEvent.change(select('세르카'), { target: { value: '노말' } });
+      fireEvent.click(chip('가나', '세르카'));
       await waitFor(() => expect(gates).toHaveLength(1));
+      expect(chip('가나', '세르카')).toHaveAttribute('aria-pressed', 'true');
       gates[0].fail();
-      expect(await screen.findByText(/저장하지 못했어요: 저장 실패/)).toBeInTheDocument();
+      expect(await screen.findByText(/가나의 클리어 표시를 저장하지 못했어요: 저장 실패/)).toBeInTheDocument();
       await waitFor(() => expect(clearGets()).toHaveLength(2));
-      await waitFor(() => expect(select('세르카').value).toBe(''));
+      await waitFor(() => expect(chip('가나', '세르카')).toHaveAttribute('aria-pressed', 'false'));
     });
   });
 
-  describe('숙련도 선택 (캐릭터 × 레이드 이름)', () => {
-    const RAID_NAMES = ['카제로스 3막 (모르둠)', '카제로스 4막 (아르모체)', '지평의 성당', '카제로스 종막 (카제로스)', '세르카', '벨가르딘'];
-    const prof = (name: string, raid: string) => screen.getByRole('combobox', { name: `${name} ${raid} 숙련도` }) as HTMLSelectElement;
+  describe('칩 설정(⋯): 가는 난이도와 숙련도', () => {
+    const K = '카제로스 종막 (카제로스)';
+    const settingsOf = (name: string, raid: string) => screen.queryByRole('group', { name: `${name} ${raid} 설정` });
+    /** 설정 칸의 선택 상자. 닫혀 있으면 ⋯를 눌러 연다. */
+    const field = (name: string, raid: string, what: '숙련도' | '가는 난이도') => {
+      if (!settingsOf(name, raid)) openSettings(name, raid);
+      return screen.getByRole('combobox', { name: `${name} ${raid} ${what}` }) as HTMLSelectElement;
+    };
+    const prof = (name: string, raid: string) => field(name, raid, '숙련도');
+    const diff = (name: string, raid: string) => field(name, raid, '가는 난이도');
     const profPuts = () => calls.filter((c) => c.url.endsWith('/proficiency')).map((c) => ({ url: c.url, method: c.method, body: c.body }));
+    const diffPuts = () => calls.filter((c) => c.url.endsWith('/target-difficulty')).map((c) => ({ url: c.url, method: c.method, body: c.body }));
     const friendGets = () => calls.filter((c) => c.url === '/api/friends' && c.method === 'GET');
     beforeEach(() => { FRIENDS[0].proficiency = { '가나|세르카': '숙련' }; });
-    afterEach(() => { delete FRIENDS[0].proficiency; });
+    afterEach(() => { delete FRIENDS[0].proficiency; delete FRIENDS[0].targetDifficulty; });
 
-    it('칸마다 숙련도 선택이 있고, 정하지 않은 칸은 "반숙 (기본)"으로 흐리게, 정한 칸은 또렷하게 보인다', async () => {
+    it('⋯ 버튼은 aria-expanded로 설정 칸을 열고 닫고, Escape로 닫으면 ⋯ 버튼으로 돌아간다', async () => {
       await renderLoaded();
-      for (const name of ['가나', '가나서폿', '다라']) for (const raid of RAID_NAMES) expect(prof(name, raid)).toBeInTheDocument();
+      const btn = settingsBtn('가나', K);
+      expect(btn).toHaveAttribute('aria-expanded', 'false');
+      expect(settingsOf('가나', K)).toBeNull();
+      fireEvent.click(btn);
+      expect(btn).toHaveAttribute('aria-expanded', 'true');
+      const panel = settingsOf('가나', K)!;
+      expect(btn).toHaveAttribute('aria-controls', panel.id);
+      const select = within(panel).getByRole('combobox', { name: `가나 ${K} 숙련도` });
+      select.focus();
+      fireEvent.keyDown(select, { key: 'Escape' });
+      expect(settingsOf('가나', K)).toBeNull();
+      expect(btn).toHaveAttribute('aria-expanded', 'false');
+      expect(btn).toHaveFocus();
+      fireEvent.click(btn);
+      fireEvent.click(within(settingsOf('가나', K)!).getByRole('button', { name: '닫기' }));
+      expect(settingsOf('가나', K)).toBeNull();
+    });
+
+    it('숙련도: 정하지 않은 칸은 "반숙 (기본)"으로 흐리게, 정한 칸은 또렷하게 + "직접 정함", 칩의 ⋯에도 표시', async () => {
+      await renderLoaded();
       const set = prof('가나', '세르카');
       expect(set.value).toBe('숙련');
       expect(set).not.toHaveClass('select--prof-default');
       expect(set).toHaveClass('select--prof-expert');
-      const unset = prof('가나', '벨가르딘');
+      expect(within(settingsOf('가나', '세르카')!).getAllByText('직접 정함')).toHaveLength(1); // 숙련도만 (가는 난이도는 자동)
+      expect(settingsBtn('가나', '세르카')).toHaveAccessibleName('가나 세르카 설정 (직접 정한 값 있음)');
+      const unset = prof('가나', K);
       expect(unset.value).toBe('');
       expect(unset).toHaveClass('select--prof-default');
       expect(within(unset).getAllByRole('option').map((o) => o.textContent)).toEqual(['◐ 반숙 (기본)', '● 숙련', '◐ 반숙', '○ 클경']);
       expect((within(unset).getByRole('option', { selected: true }) as HTMLOptionElement).textContent).toBe('◐ 반숙 (기본)');
-      // 클리어 드롭다운은 그대로 같은 칸에 있다
-      expect(set.closest('td')).toContainElement(screen.getByRole('combobox', { name: '가나 세르카 클리어' }));
+      expect(within(settingsOf('가나', K)!).queryByText('직접 정함')).toBeNull();
+      expect(settingsBtn('가나', K)).toHaveAccessibleName(`가나 ${K} 설정`);
+      // 설정 칸은 그 칩 바로 아래(같은 칸)에 펼쳐진다
+      expect(set.closest('li')).toContainElement(chip('가나', '세르카'));
     });
 
-    it('바꾸면 PUT /api/friends/<id>/proficiency (레이드 이름 기준), 기본으로 돌리면 level null', async () => {
+    it('숙련도를 바꾸면 PUT /api/friends/<id>/proficiency (레이드 이름 기준), 기본으로 돌리면 level null', async () => {
       await renderLoaded();
-      fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '클경' } });
+      fireEvent.change(prof('가나', K), { target: { value: '클경' } });
       await waitFor(() => expect(profPuts()).toHaveLength(1));
-      expect(profPuts()[0]).toEqual({ url: '/api/friends/f1/proficiency', method: 'PUT', body: { characterName: '가나', raidName: '벨가르딘', level: '클경' } });
-      expect(prof('가나', '벨가르딘').value).toBe('클경');
+      expect(profPuts()[0]).toEqual({ url: '/api/friends/f1/proficiency', method: 'PUT', body: { characterName: '가나', raidName: K, level: '클경' } });
+      expect(prof('가나', K).value).toBe('클경');
       fireEvent.change(prof('가나', '세르카'), { target: { value: '' } });
       await waitFor(() => expect(profPuts()).toHaveLength(2));
       expect(profPuts()[1].body).toEqual({ characterName: '가나', raidName: '세르카', level: null });
@@ -429,12 +518,90 @@ describe('웹 화면', () => {
 
     it('저장 뒤 공대 후보를 다시 불러온다', async () => {
       await renderLoaded();
-      fireEvent.click(screen.getByRole('checkbox', { name: '세르카 노말' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: '세르카 하드' }));
       await waitFor(() => expect(planCalls().length).toBeGreaterThan(0));
       const before = planCalls().length;
       fireEvent.change(prof('다라', '세르카'), { target: { value: '숙련' } });
       await waitFor(() => expect(profPuts()).toHaveLength(1));
       await waitFor(() => expect(planCalls().length).toBeGreaterThan(before));
+    });
+
+    it('가는 난이도: 자동(현재 자동값) + 레벨이 되는 난이도 + 안 감, 바꾸면 PUT하고 칩 글자가 바뀐다 (자동은 null)', async () => {
+      await renderLoaded();
+      const select = diff('가나', '세르카');
+      expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['자동 (하드)', '노말', '하드', '안 감']); // 1730: 나이트메어(1740)는 없다
+      expect(select.value).toBe('');
+      expect(select).toHaveClass('select--default');
+
+      fireEvent.change(select, { target: { value: '노말' } });
+      expect(chip('가나', '세르카')).toHaveAccessibleName('가나 세르카 노말: 미완'); // 먼저 화면에 반영
+      await waitFor(() => expect(diffPuts()).toHaveLength(1));
+      expect(diffPuts()[0]).toEqual({ url: '/api/friends/f1/target-difficulty', method: 'PUT', body: { characterName: '가나', raidName: '세르카', difficulty: '노말' } });
+      expect(diff('가나', '세르카')).not.toHaveClass('select--default');
+      expect(within(settingsOf('가나', '세르카')!).getAllByText('직접 정함')).toHaveLength(2);
+
+      fireEvent.change(diff('가나', '세르카'), { target: { value: '안 감' } });
+      await waitFor(() => expect(diffPuts()).toHaveLength(2));
+      expect(diffPuts()[1].body).toEqual({ characterName: '가나', raidName: '세르카', difficulty: '안 감' });
+      const skip = chip('가나', '세르카');
+      expect(skip).toHaveAccessibleName('가나 세르카: 안 감');
+      expect(skip).toHaveTextContent('세르카 · 안 감');
+      expect(skip).toBeDisabled(); // 안 가는 레이드는 클리어 표시를 하지 않는다
+
+      fireEvent.change(diff('가나', '세르카'), { target: { value: '' } });
+      await waitFor(() => expect(diffPuts()).toHaveLength(3));
+      expect(diffPuts()[2].body).toEqual({ characterName: '가나', raidName: '세르카', difficulty: null });
+      expect(chip('가나', '세르카')).toHaveAccessibleName('가나 세르카 하드: 미완');
+    });
+
+    it('직접 정한 가는 난이도로 칩을 누르면 그 난이도로 기록한다', async () => {
+      FRIENDS[0].targetDifficulty = { '가나|세르카': '노말' };
+      await renderLoaded();
+      expect(chip('가나', '세르카')).toHaveAccessibleName('가나 세르카 노말: 미완');
+      expect(diff('가나', '세르카').value).toBe('노말');
+      fireEvent.click(chip('가나', '세르카'));
+      await waitFor(() => expect(calls.some((c) => c.url === '/api/clears' && c.method === 'PUT')).toBe(true));
+      expect(calls.find((c) => c.url === '/api/clears' && c.method === 'PUT')!.body).toEqual({
+        characterName: '가나',
+        records: [{ raidName: '세르카', difficulty: '노말' }],
+      });
+    });
+
+    it('가는 난이도 저장이 실패하면 서버 값(자동)으로 되돌리고 안내한다', async () => {
+      diffResponder = async () => json({ error: '저장 실패' }, 500);
+      await renderLoaded();
+      fireEvent.change(diff('가나', '세르카'), { target: { value: '노말' } });
+      expect(await screen.findByText('가나의 세르카 가는 난이도를 저장하지 못했어요: 저장 실패')).toBeInTheDocument();
+      await waitFor(() => expect(chip('가나', '세르카')).toHaveAccessibleName('가나 세르카 하드: 미완'));
+      expect(diff('가나', '세르카').value).toBe('');
+    });
+
+    describe('카드 단위 숙련도 한 번에 바꾸기', () => {
+      const bulk = (name: string) => screen.getByRole('combobox', { name: `${name} 모든 레이드 숙련도 한 번에 바꾸기` }) as HTMLSelectElement;
+
+      it('고른 숙련도를 그 캐릭터의 모든 레이드 칩에 PUT 하나씩 보내고, "—"는 아무 것도 안 한다', async () => {
+        await renderLoaded();
+        expect(within(bulk('가나')).getAllByRole('option').map((o) => o.textContent)).toEqual(['—', '● 숙련', '◐ 반숙', '○ 클경']);
+        fireEvent.change(bulk('가나'), { target: { value: '' } });
+        await new Promise((r) => setTimeout(r, 20));
+        expect(profPuts()).toHaveLength(0);
+        fireEvent.change(bulk('가나'), { target: { value: '클경' } });
+        await waitFor(() => expect(profPuts()).toHaveLength(RAIDS_1730.length));
+        expect(profPuts().map((p) => p.body)).toEqual(RAIDS_1730.map((raidName) => ({ characterName: '가나', raidName, level: '클경' })));
+        expect(profPuts().every((p) => p.url === '/api/friends/f1/proficiency' && p.method === 'PUT')).toBe(true);
+        expect(bulk('가나').value).toBe(''); // 다시 "—"로
+        expect(prof('가나', '세르카').value).toBe('클경');
+        expect(prof('가나', K).value).toBe('클경');
+      });
+
+      it('일부가 실패하면 실패한 레이드를 모아서 알리고 그 칸만 되돌린다', async () => {
+        profResponder = async (body) => (body.raidName === '세르카' ? json({ error: '저장 실패' }, 500) : json(FRIENDS[0]));
+        await renderLoaded();
+        fireEvent.change(bulk('가나'), { target: { value: '클경' } });
+        expect(await screen.findByText('가나의 숙련도를 1개 레이드(세르카)에서 저장하지 못했어요: 저장 실패')).toBeInTheDocument();
+        await waitFor(() => expect(prof('가나', '세르카').value).toBe('숙련')); // 서버 값으로
+        expect(prof('가나', K).value).toBe('클경');
+      });
     });
 
     describe('저장 순서', () => {
@@ -455,40 +622,40 @@ describe('웹 화면', () => {
 
       it('같은 칸을 빠르게 여러 번 바꾸면 하나씩 순서대로 보내고, 마지막 값으로 끝난다', async () => {
         await renderLoaded();
-        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '클경' } });
+        fireEvent.change(prof('가나', K), { target: { value: '클경' } });
         await waitFor(() => expect(gates).toHaveLength(1));
-        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '숙련' } });
-        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '반숙' } });
+        fireEvent.change(prof('가나', K), { target: { value: '숙련' } });
+        fireEvent.change(prof('가나', K), { target: { value: '반숙' } });
         await new Promise((r) => setTimeout(r, 20));
         expect(gates).toHaveLength(1); // 앞 요청이 끝나기 전에는 보내지 않는다
-        expect(prof('가나', '벨가르딘').value).toBe('반숙');
+        expect(prof('가나', K).value).toBe('반숙');
         gates[0].ok();
         await waitFor(() => expect(gates).toHaveLength(2));
         expect(gates[1].body.level).toBe('반숙'); // 대기 중이던 변경은 최신 값 하나로
         gates[1].ok();
-        await waitFor(() => expect(server['가나|벨가르딘']).toBe('반숙'));
+        await waitFor(() => expect(server[`가나|${K}`]).toBe('반숙'));
         expect(gates.map((g) => g.body.level)).toEqual(['클경', '반숙']);
-        expect(prof('가나', '벨가르딘').value).toBe('반숙');
+        expect(prof('가나', K).value).toBe('반숙');
       });
 
       it('다른 칸은 서로 기다리지 않는다', async () => {
         await renderLoaded();
-        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '클경' } });
+        fireEvent.change(prof('가나', K), { target: { value: '클경' } });
         fireEvent.change(prof('가나', '지평의 성당'), { target: { value: '숙련' } });
         await waitFor(() => expect(gates).toHaveLength(2));
       });
 
       it('첫 저장이 실패해도 대기 중인 새 값은 되돌리지 않는다', async () => {
         await renderLoaded();
-        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '클경' } });
+        fireEvent.change(prof('가나', K), { target: { value: '클경' } });
         await waitFor(() => expect(gates).toHaveLength(1));
-        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '숙련' } });
+        fireEvent.change(prof('가나', K), { target: { value: '숙련' } });
         gates[0].fail();
         await waitFor(() => expect(gates).toHaveLength(2));
         gates[1].ok();
-        await waitFor(() => expect(server['가나|벨가르딘']).toBe('숙련'));
+        await waitFor(() => expect(server[`가나|${K}`]).toBe('숙련'));
         await new Promise((r) => setTimeout(r, 20));
-        expect(prof('가나', '벨가르딘').value).toBe('숙련');
+        expect(prof('가나', K).value).toBe('숙련');
         expect(screen.queryByText(/숙련도를 저장하지 못했어요/)).not.toBeInTheDocument();
       });
 
@@ -506,18 +673,18 @@ describe('웹 화면', () => {
 
       it('숙련도 저장 중에 같은 친구의 전투력 저장이 끝나도 화면의 숙련도 값이 되돌아가지 않는다', async () => {
         await renderLoaded();
-        fireEvent.change(prof('가나', '벨가르딘'), { target: { value: '클경' } });
+        fireEvent.change(prof('가나', K), { target: { value: '클경' } });
         await waitFor(() => expect(gates).toHaveLength(1));
-        // 전투력 저장 응답은 서버 사본(숙련도 저장 전)이라 벨가르딘 칸 값이 없다
+        // 전투력 저장 응답은 서버 사본(숙련도 저장 전)이라 종막 칸 값이 없다
         const input = screen.getByRole('spinbutton', { name: '가나서폿 전투력' });
         fireEvent.change(input, { target: { value: '1800' } });
         fireEvent.submit(input.closest('form')!);
         expect(await screen.findByText('1,800')).toBeInTheDocument();
-        expect(prof('가나', '벨가르딘').value).toBe('클경');
+        expect(prof('가나', K).value).toBe('클경');
         gates[0].ok();
-        await waitFor(() => expect(server['가나|벨가르딘']).toBe('클경'));
+        await waitFor(() => expect(server[`가나|${K}`]).toBe('클경'));
         await new Promise((r) => setTimeout(r, 20));
-        expect(prof('가나', '벨가르딘').value).toBe('클경');
+        expect(prof('가나', K).value).toBe('클경');
         expect(prof('가나', '세르카').value).toBe('숙련'); // 다른 칸은 서버 사본 그대로
       });
 
@@ -546,8 +713,8 @@ describe('웹 화면', () => {
       excluded: [],
     };
     await renderLoaded();
-    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 노말' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: '벨가르딘 노말' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '세르카 하드' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '카제로스 종막 (카제로스) 하드' }));
     await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(4));
     const ids = screen.getAllByRole('article').map((a) => a.getAttribute('aria-labelledby')!);
     expect(new Set(ids).size).toBe(4);
@@ -561,7 +728,6 @@ describe('웹 화면', () => {
 
 describe('이번 주 클리어 친구 필터', () => {
   const FILTER_KEY = 'loa.clearsFilter';
-  const chip = (name: RegExp | string) => screen.getByRole('button', { name });
   const filterGroup = () => screen.getByRole('group', { name: '친구별로 보기' });
 
   it('전체 + 친구별 칩이 캐릭터 수와 함께 button/aria-pressed로 보인다', async () => {
@@ -575,12 +741,12 @@ describe('이번 주 클리어 친구 필터', () => {
   it('친구 칩을 누르면 그 친구 캐릭터만, 전체를 누르면 모두 보인다', async () => {
     await renderLoaded();
     fireEvent.click(within(filterGroup()).getByRole('button', { name: /^민수/ }));
-    expect(screen.getByRole('combobox', { name: '다라 세르카 클리어' })).toBeInTheDocument();
-    expect(screen.queryByRole('combobox', { name: '가나 세르카 클리어' })).not.toBeInTheDocument();
+    expect(chip('다라', '세르카')).toBeInTheDocument();
+    expect(queryChip('가나', '세르카')).not.toBeInTheDocument();
     expect(within(filterGroup()).getByRole('button', { name: /^민수/ })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(within(filterGroup()).getByRole('button', { name: /^전체/ }));
-    expect(screen.getByRole('combobox', { name: '가나 세르카 클리어' })).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: '다라 세르카 클리어' })).toBeInTheDocument();
+    expect(chip('가나', '세르카')).toBeInTheDocument();
+    expect(chip('다라', '세르카')).toBeInTheDocument();
   });
 
   it('필터를 골라도 참석자와 공대 요청은 바뀌지 않는다', async () => {
@@ -607,14 +773,14 @@ describe('이번 주 클리어 친구 필터', () => {
     fireEvent.click(within(screen.getByRole('group', { name: '영준 삭제 확인' })).getByRole('button', { name: '삭제하기' }));
     await waitFor(() => expect(within(filterGroup()).queryByRole('button', { name: /^영준/ })).not.toBeInTheDocument());
     expect(within(filterGroup()).getByRole('button', { name: /^전체/ })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('combobox', { name: '다라 세르카 클리어' })).toBeInTheDocument();
+    expect(chip('다라', '세르카')).toBeInTheDocument();
   });
 
   it('저장된 필터를 적용하고, 선택 시 저장한다', async () => {
     localStorage.setItem(FILTER_KEY, 'f2');
     render(<Home />);
-    await screen.findByRole('combobox', { name: '다라 세르카 클리어' });
-    expect(screen.queryByRole('combobox', { name: '가나 세르카 클리어' })).not.toBeInTheDocument();
+    await screen.findByRole('button', { name: chipName('다라', '세르카') });
+    expect(queryChip('가나', '세르카')).not.toBeInTheDocument();
     fireEvent.click(within(filterGroup()).getByRole('button', { name: /^영준/ }));
     expect(localStorage.getItem(FILTER_KEY)).toBe('f1');
   });
@@ -622,7 +788,7 @@ describe('이번 주 클리어 친구 필터', () => {
   it('저장된 값이 없는 친구를 가리키면 무시한다', async () => {
     localStorage.setItem(FILTER_KEY, 'ghost');
     await renderLoaded();
-    expect(screen.getByRole('combobox', { name: '다라 세르카 클리어' })).toBeInTheDocument();
+    expect(chip('다라', '세르카')).toBeInTheDocument();
     expect(within(filterGroup()).getByRole('button', { name: /^전체/ })).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -640,7 +806,7 @@ describe('이번 주 클리어 친구 필터', () => {
     try {
       await renderLoaded();
       fireEvent.click(within(filterGroup()).getByRole('button', { name: /^민수/ }));
-      expect(screen.queryByRole('combobox', { name: '가나 세르카 클리어' })).not.toBeInTheDocument();
+      expect(queryChip('가나', '세르카')).not.toBeInTheDocument();
     } finally {
       Storage.prototype.getItem = orig;
       Storage.prototype.setItem = origSet;
@@ -651,11 +817,9 @@ describe('이번 주 클리어 친구 필터', () => {
     FRIENDS[0].characters = [ch('낮음', 'dealer', 100), ch('없음', 'dealer', null, 1800), ch('높음', 'dealer', 3000)];
     try {
       render(<Home />);
-      await screen.findByRole('combobox', { name: '높음 세르카 클리어' });
-      const names = screen.getAllByRole('combobox')
-        .map((s) => s.getAttribute('aria-label')!)
-        .filter((l) => l.endsWith('세르카 클리어'))
-        .map((l) => l.split(' ')[0]);
+      await screen.findByRole('button', { name: chipName('높음', '세르카') });
+      const names = screen.getAllByRole('button', { name: / 세르카 \S+: / })
+        .map((b) => b.getAttribute('aria-label')!.split(' ')[0]);
       expect(names).toEqual(['높음', '낮음', '없음', '다라']);
     } finally {
       FRIENDS[0].characters = [ch('가나'), ch('가나서폿', 'support', null)];

@@ -1,6 +1,9 @@
 import { RAIDS } from '@/core/raids';
 import { proficiencyKey } from '@/core/proficiency';
-import type { ClearRecord, Friend, PlanSummary, Proficiency, RaidConfig, Role, Slot, Tier } from '@/core/types';
+import { SKIP_DIFFICULTY, autoDifficulty, difficultiesOf, effectiveDifficulty, targetDifficultyKey, targetDifficultyLookup } from '@/core/difficulty';
+import { eligibleCharacters } from '@/core/eligibility';
+import { visibleFriend } from '@/core/visible';
+import type { Character, ClearRecord, Friend, PlanSummary, Proficiency, RaidConfig, Role, Slot, Tier } from '@/core/types';
 
 /** 레이드 이름별 묶음 (설정 순서 유지). 클리어 표의 열과 레이드 선택 화면에 쓴다. */
 export interface RaidGroup { name: string; raids: RaidConfig[]; }
@@ -126,4 +129,83 @@ export function withProficiency(
     if (level === null) delete next[key]; else next[key] = level;
     return Object.keys(next).length ? { ...rest, proficiency: next } : rest;
   });
+}
+
+/** 한 친구의 한 칸(캐릭터 × 레이드 이름) 가는 난이도를 바꾼 친구 목록. null이면 지워 자동으로. 원본은 그대로. */
+export function withTargetDifficulty(
+  friends: Friend[],
+  friendId: string,
+  characterName: string,
+  raidName: string,
+  value: string | null,
+): Friend[] {
+  const key = targetDifficultyKey(characterName, raidName);
+  return friends.map((f) => {
+    if (f.id !== friendId) return f;
+    const { targetDifficulty: prev, ...rest } = f;
+    const next: Record<string, string> = { ...(prev ?? {}) };
+    if (value === null) delete next[key]; else next[key] = value;
+    return Object.keys(next).length ? { ...rest, targetDifficulty: next } : rest;
+  });
+}
+
+/**
+ * 캐릭터 카드의 레이드 칩 하나 (레이드 이름 단위).
+ * auto = 자동 기본값, override = 직접 정한 값(난이도 또는 `안 감`), target = 실제로 가는 난이도(안 감이면 null),
+ * cleared = 이번 주에 간 난이도(안 갔으면 ''), shown = 칩에 보일 난이도(갔으면 간 난이도, 아니면 가는 난이도 또는 `안 감`),
+ * options = 레벨이 되는 난이도들 (입장 레벨 순서), proficiency = 직접 정한 숙련도.
+ */
+export interface RaidChipModel {
+  raidName: string;
+  auto: string;
+  override: string | undefined;
+  target: string | null;
+  cleared: string;
+  shown: string;
+  options: string[];
+  proficiency: Proficiency | undefined;
+}
+
+/** 캐릭터가 갈 수 있는 레이드 이름마다 칩 (아이템 레벨 ≥ 그 레이드 이름의 가장 낮은 입장 레벨), 설정 순서. */
+export function raidChips(friend: Friend, character: Character, clears: ClearRecord[]): RaidChipModel[] {
+  const out: RaidChipModel[] = [];
+  for (const g of RAID_GROUPS) {
+    const auto = autoDifficulty(character.itemLevel, g.name);
+    if (auto === null) continue;
+    const override = friend.targetDifficulty?.[targetDifficultyKey(character.name, g.name)];
+    const target = effectiveDifficulty(character.itemLevel, g.name, override);
+    const cleared = clearValue(clears, character.name, g.name);
+    const levels = new Map(g.raids.map((r) => [r.difficulty, r.minLevel]));
+    out.push({
+      raidName: g.name,
+      auto,
+      override,
+      target,
+      cleared,
+      shown: cleared || (target ?? SKIP_DIFFICULTY),
+      options: difficultiesOf(g.name).filter((d) => (levels.get(d) ?? Infinity) <= character.itemLevel),
+      proficiency: friend.proficiency?.[proficiencyKey(character.name, g.name)],
+    });
+  }
+  return out;
+}
+
+/** 칩을 한 번 눌렀을 때 기록할 난이도: 갔으면 '' (해제), 아니면 가는 난이도, 안 감이면 null (아무 것도 안 함). */
+export function chipToggleDifficulty(chip: RaidChipModel): string | null {
+  if (chip.cleared) return '';
+  return chip.target;
+}
+
+/**
+ * 레이드 고르기 화면의 후보 캐릭터 수 (레이드 id → 수). 참석하는 친구의 보이는 캐릭터 중 편성 자격
+ * (레벨, 이번 주 미클리어, 가는 난이도 == 그 난이도)을 통과한 수. 자격 규칙은 core의 eligibleCharacters를 그대로 쓴다.
+ */
+export function candidateCounts(friends: Friend[], attendeeIds: string[], clears: ClearRecord[]): Record<string, number> {
+  const attending = friends.filter((f) => attendeeIds.includes(f.id)).map(visibleFriend);
+  const out: Record<string, number> = {};
+  for (const raid of RAIDS) {
+    const targetOf = targetDifficultyLookup(attending, raid.name);
+    out[raid.id] = attending.reduce((n, f) => n + eligibleCharacters(f, raid, clears, (c) => targetOf(f.id, c)).length, 0);
+  }
+  return out;
 }
