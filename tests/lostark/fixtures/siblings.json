@@ -1,0 +1,9 @@
+{
+  "_unverified": true,
+  "_note": "Hand-written from documented shapes; replace with probe output.",
+  "data": [
+    { "ServerName": "루페온", "CharacterName": "가명버서커", "CharacterLevel": 70, "CharacterClassName": "버서커", "ItemAvgLevel": "1,620.00", "ItemMaxLevel": "1,620.00" },
+    { "ServerName": "루페온", "CharacterName": "가명도화가", "CharacterLevel": 70, "CharacterClassName": "도화가", "ItemAvgLevel": "1,590.50", "ItemMaxLevel": "1,590.50" },
+    { "ServerName": "루페온", "CharacterName": "가명미확인", "CharacterLevel": 60, "CharacterClassName": "미확인직업", "ItemAvgLevel": "이상한값", "ItemMaxLevel": "0" }
+  ]
+}
